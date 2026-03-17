@@ -12,6 +12,7 @@ class Tag(BaseModel):
 class PLCConfig(BaseModel):
     id: str
     name: str
+    hall_id: Optional[str] = None
     ip: str
     rack: int = 0
     slot: int = 1
@@ -19,10 +20,13 @@ class PLCConfig(BaseModel):
     tags: List[Tag] = []
     online: bool = False
 
+class HallConfig(BaseModel):
+    id: str
+    name: str
+
 class GlobalSettings(BaseModel):
     plcs: List[PLCConfig] = []
-    mqtt_broker: str = "localhost"
-    mqtt_port: int = 1883
+    halls: List[HallConfig] = []
     poll_rate: float = 1.0  # seconds
     admin_password_hash: Optional[str] = None # Składowane hasło admina
 

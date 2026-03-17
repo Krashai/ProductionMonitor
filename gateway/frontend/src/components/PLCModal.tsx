@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2, Upload, AlertCircle, Fingerprint, Network, Cpu, Layers, Settings, CheckCircle2, Wand2 } from 'lucide-react';
-import { createPLC, updatePLC, Tag, PLC } from '../api';
+import { X, Plus, Trash2, Upload, AlertCircle, Fingerprint, Network, Cpu, Layers, Settings, CheckCircle2, Wand2, Factory } from 'lucide-react';
+import { createPLC, updatePLC, getHalls, Tag, PLC, Hall } from '../api';
 import { PLC_PRESETS } from '../presets';
 
 interface Props {
@@ -14,10 +14,12 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
   const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [ip, setIp] = useState('');
+  const [hallId, setHallId] = useState('');
   const [type, setType] = useState('S7-1200');
   const [rack, setRack] = useState(0);
   const [slot, setSlot] = useState(1);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [halls, setHalls] = useState<Hall[]>([]);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,10 +27,14 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
 
   useEffect(() => {
     if (isOpen) {
+      // Pobierz listę hal
+      getHalls().then(res => setHalls(res.data)).catch(console.error);
+
       if (initialData) {
         setId(initialData.id);
         setName(initialData.name);
         setIp(initialData.ip);
+        setHallId(initialData.hall_id || '');
         setType(initialData.type);
         setRack(initialData.rack);
         setSlot(initialData.slot);
@@ -37,6 +43,7 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
         setId('');
         setName('');
         setIp('');
+        setHallId('');
         setType('S7-1200');
         setRack(0);
         setSlot(1);
@@ -89,7 +96,6 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
     reader.onload = (event) => {
       const text = event.target?.result as string;
       const rows = text.split('\n').filter(row => row.trim() !== '');
-      // skip header
       const dataRows = rows.slice(1);
       
       const newTags: Tag[] = [];
@@ -97,7 +103,6 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
 
       for (const row of dataRows) {
         const parts = row.split(',').map(s => s.trim());
-        // Obsługa starego formatu (4 elementy) i nowego z bitem (5 elementów)
         const tagName = parts[0];
         const db = parts[1];
         const offset = parts[2];
@@ -138,7 +143,6 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
       setTimeout(() => setSuccessMsg(''), 5000);
     };
     reader.readAsText(file);
-    // Reset file input value to allow importing the same file again if needed
     e.target.value = '';
   };
 
@@ -147,14 +151,14 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
     setError('');
     setLoading(true);
 
-    if (!id || !name || !ip) {
-      setError('Wypełnij pola ID, Nazwa i IP.');
+    if (!id || !name || !ip || !hallId) {
+      setError('Wypełnij pola ID, Nazwa, IP oraz wybierz Halę.');
       setLoading(false);
       return;
     }
 
     try {
-      const payload = { id, name, ip, type, rack, slot, tags };
+      const payload = { id, name, ip, hall_id: hallId, type, rack, slot, tags };
       if (initialData) {
         await updatePLC(initialData.id, payload);
       } else {
@@ -213,7 +217,7 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
           )}
 
           {/* Basic Info Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label htmlFor="plc-id" className="text-xs font-bold text-gray-700 uppercase tracking-wider ml-1">ID Sterownika</label>
               <div className="relative group">
@@ -245,6 +249,9 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
                 />
               </div>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label htmlFor="plc-ip" className="text-xs font-bold text-gray-700 uppercase tracking-wider ml-1">Adres IP</label>
               <div className="relative group">
@@ -257,6 +264,23 @@ const PLCModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, initialData }) 
                   placeholder="192.168.0.10"
                   className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl font-mono focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm text-gray-900"
                 />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="plc-hall" className="text-xs font-bold text-gray-700 uppercase tracking-wider ml-1">Hala Produkcyjna</label>
+              <div className="relative group">
+                <Factory className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors" size={18} />
+                <select
+                  id="plc-hall"
+                  value={hallId}
+                  onChange={(e) => setHallId(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm appearance-none text-gray-900"
+                >
+                  <option value="">Wybierz halę...</option>
+                  {halls.map(hall => (
+                    <option key={hall.id} value={hall.id}>{hall.name}</option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

@@ -4,8 +4,9 @@ from pathlib import Path
 from app.core.models import GlobalSettings
 
 # Spójna ścieżka z wolumenem w docker-compose
-DEFAULT_CONFIG_PATH = "/app/backend/config/settings.json"
+DEFAULT_CONFIG_PATH = "/app/config/settings.json"
 CONFIG_PATH = Path(os.getenv("CONFIG_PATH", DEFAULT_CONFIG_PATH))
+
 
 def load_settings() -> GlobalSettings:
     """Wczytuje ustawienia z pliku JSON lub zwraca domyślne."""
@@ -22,18 +23,6 @@ def load_settings() -> GlobalSettings:
     else:
         # Próbujemy stworzyć folder jeśli nie istnieje
         path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Nadpisujemy zmiennymi środowiskowymi jeśli obecne
-    env_broker = os.getenv("MQTT_BROKER")
-    if env_broker:
-        settings.mqtt_broker = env_broker
-    
-    env_port = os.getenv("MQTT_PORT")
-    if env_port:
-        try:
-            settings.mqtt_port = int(env_port)
-        except ValueError:
-            pass
 
     return settings
 

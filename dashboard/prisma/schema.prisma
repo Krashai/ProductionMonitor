@@ -19,11 +19,13 @@ model Hall {
 }
 
 model Line {
-  id      String @id @default(cuid())
-  hallId  String
-  hall    Hall   @relation(fields: [hallId], references: [id])
-  plcId   String @unique
-  name    String
+  id       String  @id @default(cuid())
+  hallId   String
+  hall     Hall    @relation(fields: [hallId], references: [id])
+  plcId    String  @unique
+  name     String
+  isOnline Boolean @default(false)
+
 
   plans    ProductionPlan[]
   history  MachineStatusHistory[]

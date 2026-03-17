@@ -1,21 +1,6 @@
 version: '3.8'
 
 services:
-  # Wspólny Broker MQTT
-  mqtt:
-    image: eclipse-mosquitto:latest
-    container_name: pm-mqtt
-    ports:
-      - "1883:1883"
-      - "9001:9001"
-    volumes:
-      - mqtt_data:/mosquitto/data
-      - mqtt_log:/mosquitto/log
-      - ./gateway/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-    networks:
-      - prod_net
-    restart: always
-
   # --- PLC GATEWAY SERVICES ---
   gateway-backend:
     build: ./gateway/backend
@@ -23,12 +8,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./gateway/backend/config:/app/backend/config
+      - ./gateway/backend/config:/app/config
+      - ./gateway/backend/app:/app/app
     environment:
-      - MQTT_BROKER=mqtt
-      - MQTT_PORT=1883
+      - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
     depends_on:
-      - mqtt
+      dashboard-db:
+        condition: service_healthy
     networks:
       - prod_net
     restart: always
@@ -81,37 +67,15 @@ services:
       - /app/node_modules
       - /app/.next
     environment:
-      - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt?schema=public
+      - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
       - NODE_ENV=development
     networks:
       - prod_net
     restart: always
-
-  dashboard-worker:
-    build:
-      context: ./dashboard
-      dockerfile: Dockerfile.worker
-    container_name: pm-dashboard-worker
-    depends_on:
-      dashboard-db:
-        condition: service_healthy
-      mqtt:
-        condition: service_started
-    volumes:
-      - ./dashboard:/app
-      - /app/node_modules
-    environment:
-      - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt?schema=public
-      - MQTT_BROKER_URL=mqtt://mqtt:1883
-    restart: always
-    networks:
-      - prod_net
 
 networks:
   prod_net:
     driver: bridge
 
 volumes:
-  mqtt_data:
-  mqtt_log:
   dashboard_pgdata:
