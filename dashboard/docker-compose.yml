@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: line-gantt-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: line_gantt
+      TS_TUNE: "off"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - gateway_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d line_gantt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: line-gantt-app
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/line_gantt?schema=public
+      - NODE_ENV=development
+    networks:
+      - gateway_net
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: line-gantt-worker
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ["./node_modules/.bin/tsx", "src/worker/index.ts"]
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/line_gantt?schema=public
+      - MQTT_BROKER_URL=mqtt://10.10.0.244:1883
+    restart: always
+    networks:
+      - gateway_net
+
+volumes:
+  pgdata:
+
+networks:
+  gateway_net:
+    external: true
+    name: plcgateway_gateway_net

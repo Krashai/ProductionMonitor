@@ -1,0 +1,17 @@
+FROM node:20-alpine
+
+RUN apk add --no-cache openssl
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY prisma ./prisma/
+
+RUN npm install --legacy-peer-deps
+RUN npx prisma generate
+
+COPY src/worker ./src/worker
+COPY tsconfig.json ./
+COPY src/lib ./src/lib
+
+CMD ["./node_modules/.bin/tsx", "src/worker/index.ts"]

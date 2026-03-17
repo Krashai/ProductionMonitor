@@ -1,0 +1,92 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Hall {
+  id    String @id @default(cuid())
+  name  String @unique
+  lines Line[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("halls")
+}
+
+model Line {
+  id      String @id @default(cuid())
+  hallId  String
+  hall    Hall   @relation(fields: [hallId], references: [id])
+  plcId   String @unique
+  name    String
+
+  plans    ProductionPlan[]
+  history  MachineStatusHistory[]
+  scrap    ScrapEvent[]
+  comments DowntimeComment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("lines")
+}
+
+model ProductionPlan {
+  id           String   @id @default(cuid())
+  lineId       String
+  line         Line     @relation(fields: [lineId], references: [id])
+  productIndex String
+  startTime    DateTime
+  endTime      DateTime
+  plannedSpeed Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("production_plans")
+}
+
+// TimescaleDB Hypertable
+model MachineStatusHistory {
+  id      String   @default(cuid())
+  time    DateTime @default(now()) @db.Timestamptz
+  lineId  String
+  line    Line     @relation(fields: [lineId], references: [id])
+  status  Boolean
+  speed   Float
+
+  @@id([id, time]) // Klucz kompozytowy dla TimescaleDB
+  @@index([time])
+  @@map("machine_status_history")
+}
+
+// TimescaleDB Hypertable
+model ScrapEvent {
+  id     String   @default(cuid())
+  time   DateTime @default(now()) @db.Timestamptz
+  lineId String
+  line   Line     @relation(fields: [lineId], references: [id])
+
+  @@id([id, time]) // Klucz kompozytowy dla TimescaleDB
+  @@index([time])
+  @@map("scrap_events")
+}
+
+model DowntimeComment {
+  id        String   @id @default(cuid())
+  lineId    String
+  line      Line     @relation(fields: [lineId], references: [id])
+  startTime DateTime
+  endTime   DateTime
+  comment   String   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("downtime_comments")
+}

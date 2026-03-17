@@ -1,0 +1,617 @@
+{
+    "plcs": [
+        {
+            "id": "LP202",
+            "name": "LP202",
+            "ip": "10.3.0.68",
+            "rack": 0,
+            "slot": 2,
+            "type": "S7-300",
+            "tags": [
+                {
+                    "name": "Speed",
+                    "db": 111,
+                    "offset": 18,
+                    "bit": 0,
+                    "type": "REAL"
+                },
+                {
+                    "name": "Status",
+                    "db": 111,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "id": "LP405",
+            "name": "LP405",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP702",
+            "name": "LP702",
+            "ip": "10.3.0.53",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ]
+        },
+        {
+            "id": "LP802",
+            "name": "LP802",
+            "ip": "10.3.0.77",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1500",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 370,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "REAL"
+                },
+                {
+                    "name": "Scrap",
+                    "db": 30,
+                    "offset": 436,
+                    "bit": 3,
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "id": "LP902",
+            "name": "LP902",
+            "ip": "10.3.0.100",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "REAL"
+                },
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 422,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Scrap_Pulse",
+                    "db": 30,
+                    "offset": 423,
+                    "bit": 5,
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "id": "LP302",
+            "name": "LP302",
+            "ip": "10.3.0.69",
+            "rack": 0,
+            "slot": 2,
+            "type": "S7-300",
+            "tags": [
+                {
+                    "name": "Speed",
+                    "db": 111,
+                    "offset": 22,
+                    "bit": 0,
+                    "type": "REAL"
+                },
+                {
+                    "name": "Status",
+                    "db": 111,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                }
+            ]
+        },
+        {
+            "id": "LP402",
+            "name": "LP402",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP502",
+            "name": "LP502",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP602",
+            "name": "LP602",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LCE131",
+            "name": "LCE131",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP205",
+            "name": "LP205",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP305",
+            "name": "LP305",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP505",
+            "name": "LP505",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP605",
+            "name": "LP605",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP705",
+            "name": "LP705",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP707",
+            "name": "LP707",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP805",
+            "name": "LP805",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "INS1",
+            "name": "INS1",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "INS2",
+            "name": "INS2",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LCE132",
+            "name": "LCE132",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP606",
+            "name": "LP606",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP607",
+            "name": "LP607",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP608",
+            "name": "LP608",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        },
+        {
+            "id": "LP609",
+            "name": "LP609",
+            "ip": "0.0.0.0",
+            "rack": 0,
+            "slot": 1,
+            "type": "S7-1200",
+            "tags": [
+                {
+                    "name": "Status",
+                    "db": 30,
+                    "offset": 0,
+                    "bit": 0,
+                    "type": "BOOL"
+                },
+                {
+                    "name": "Speed",
+                    "db": 30,
+                    "offset": 2,
+                    "bit": 0,
+                    "type": "REAL"
+                }
+            ],
+            "online": false
+        }
+    ],
+    "mqtt_broker": "127.0.0.1",
+    "mqtt_port": 1883,
+    "poll_rate": 1.0,
+    "admin_password_hash": "$2b$12$1stX1mZPFW4uvpwqPtuk.e63D9SEOa.CA4mBDSAbWHGVYxUo8gLvu"
+}

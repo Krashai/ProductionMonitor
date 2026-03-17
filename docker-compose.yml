@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  # Wspólny Broker MQTT
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: pm-mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - mqtt_data:/mosquitto/data
+      - mqtt_log:/mosquitto/log
+      - ./gateway/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - prod_net
+    restart: always
+
+  # --- PLC GATEWAY SERVICES ---
+  gateway-backend:
+    build: ./gateway/backend
+    container_name: pm-gateway-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./gateway/backend/config:/app/backend/config
+    environment:
+      - MQTT_BROKER=mqtt
+      - MQTT_PORT=1883
+    depends_on:
+      - mqtt
+    networks:
+      - prod_net
+    restart: always
+
+  gateway-frontend:
+    build: ./gateway/frontend
+    container_name: pm-gateway-frontend
+    ports:
+      - "3000:80"
+    networks:
+      - prod_net
+    depends_on:
+      - gateway-backend
+    restart: always
+
+  # --- LINE GANTT DASHBOARD SERVICES ---
+  dashboard-db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: pm-dashboard-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: line_gantt
+      TS_TUNE: "off"
+    ports:
+      - "5432:5432"
+    volumes:
+      - dashboard_pgdata:/var/lib/postgresql/data
+    networks:
+      - prod_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d line_gantt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  dashboard-app:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.dev
+    container_name: pm-dashboard-app
+    depends_on:
+      dashboard-db:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt?schema=public
+      - NODE_ENV=development
+    networks:
+      - prod_net
+    restart: always
+
+  dashboard-worker:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.worker
+    container_name: pm-dashboard-worker
+    depends_on:
+      dashboard-db:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+    environment:
+      - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt?schema=public
+      - MQTT_BROKER_URL=mqtt://mqtt:1883
+    restart: always
+    networks:
+      - prod_net
+
+networks:
+  prod_net:
+    driver: bridge
+
+volumes:
+  mqtt_data:
+  mqtt_log:
+  dashboard_pgdata:

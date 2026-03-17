@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/components/AddPLCModal.tsx","./src/components/Dashboard.tsx","./src/components/Login.tsx","./src/components/PLCCard.tsx","./src/hooks/useWebsocket.ts"],"errors":true,"version":"5.9.3"}
