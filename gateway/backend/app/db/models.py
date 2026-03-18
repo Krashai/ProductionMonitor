@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, Boolean, DateTime, ForeignKey, Index, Text
+from sqlalchemy import Column, String, Float, Boolean, DateTime, ForeignKey, Index, Text, Integer, JSON
 from sqlalchemy.sql import func
 from .session import Base
 import uuid
@@ -22,8 +22,15 @@ class Line(Base):
     plcId = Column("plcId", String, unique=True, nullable=False)
     name = Column(String, nullable=False)
     isOnline = Column("isOnline", Boolean, default=False, nullable=False)
-    createdAt = Column("createdAt", DateTime, default=func.now(), server_default=func.now(), nullable=False)
+    
+    # Connection settings
+    ip = Column(String, default="127.0.0.1", nullable=False)
+    rack = Column(Integer, default=0, nullable=False)
+    slot = Column(Integer, default=1, nullable=False)
+    type = Column(String, default="S7-1200", nullable=False)
+    tags = Column(JSON, default=[], nullable=False)
 
+    createdAt = Column("createdAt", DateTime, default=func.now(), server_default=func.now(), nullable=False)
     updatedAt = Column("updatedAt", DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
 class ProductionPlan(Base):

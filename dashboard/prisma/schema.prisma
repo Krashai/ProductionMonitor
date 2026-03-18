@@ -26,6 +26,12 @@ model Line {
   name     String
   isOnline Boolean @default(false)
 
+  // Connection settings
+  ip   String @default("127.0.0.1")
+  rack Int    @default(0)
+  slot Int    @default(1)
+  type String @default("S7-1200")
+  tags Json   @default("[]")
 
   plans    ProductionPlan[]
   history  MachineStatusHistory[]

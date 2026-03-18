@@ -165,7 +165,7 @@ export function ProductionTimeline({ lineId, initialPlans, initialHistory, initi
                 </div>
 
                 <div className="absolute inset-0 flex bg-slate-50/50 rounded-xl border border-slate-100 shadow-[inset_0_2px_10px_rgb(0,0,0,0.02)] overflow-visible z-10" onMouseUp={onMouseUp}>
-                  {plan.segments.map((seg, idx) => {
+                  {plan.segments.map((seg: any, idx: number) => {
                     const width = ((getPosition(seg.end) - getPosition(seg.start)) / planWidth) * 100;
                     const matchingComments = initialComments.filter(c => {
                       const cStart = new Date(c.startTime);

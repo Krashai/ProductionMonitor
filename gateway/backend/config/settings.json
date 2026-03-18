@@ -1,23 +1,4 @@
 {
-    "plcs": [],
-    "halls": [
-        {
-            "id": "cmmusa49w0000wossr0ti7gn8",
-            "name": "HALA 1"
-        },
-        {
-            "id": "cmmusa4aq000bwoss2htnh4ag",
-            "name": "HALA 2"
-        },
-        {
-            "id": "cmmusa4b9000kwosspyikn4he",
-            "name": "HALA 3"
-        },
-        {
-            "id": "cmmusa4c70011wossat70cu42",
-            "name": "HALA 4"
-        }
-    ],
     "poll_rate": 1.0,
     "admin_password_hash": "$2b$12$1stX1mZPFW4uvpwqPtuk.e63D9SEOa.CA4mBDSAbWHGVYxUo8gLvu"
 }

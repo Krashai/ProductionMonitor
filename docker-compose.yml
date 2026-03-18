@@ -72,6 +72,7 @@ services:
     networks:
       - prod_net
     restart: always
+    command: sh -c "npx prisma db push && npm run dev"
 
 networks:
   prod_net:

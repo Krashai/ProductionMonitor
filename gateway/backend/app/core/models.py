@@ -25,8 +25,6 @@ class HallConfig(BaseModel):
     name: str
 
 class GlobalSettings(BaseModel):
-    plcs: List[PLCConfig] = []
-    halls: List[HallConfig] = []
     poll_rate: float = 1.0  # seconds
     admin_password_hash: Optional[str] = None # Składowane hasło admina
 

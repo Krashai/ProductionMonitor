@@ -299,8 +299,8 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
       {/* KPI & LOG SECTIONS */}
       <div className="flex-1 flex flex-col lg:flex-row gap-6 min-h-0 pb-4">
         <div className="lg:w-2/3 grid grid-cols-1 md:grid-cols-3 gap-6 h-full">
-          <KPICard label="Dostępność" value={kpi.availability} unit="%" icon={Timer} color="emerald" progress={kpi.availability} description="Czas pracy vs Plan" tooltip="Stosunek rzeczywistego czasu pracy maszyny do całkowitego czasu zaplanowanego w harmonogramie." className="h-full" />
-          <KPICard label="Wydajność" value={kpi.performance} unit="%" icon={Gauge} color="blue" progress={kpi.performance} description="Prędkość rzeczywista" tooltip="Porównanie średniej prędkości rzeczywistej z prędkością zadaną w planie produkcji." className="h-full" />
+          <KPICard label="Dostępność" value={kpi.availability} unit="%" icon={Timer} color="emerald" description="Czas pracy vs Plan" tooltip="Stosunek rzeczywistego czasu pracy maszyny do całkowitego czasu zaplanowanego w harmonogramie." className="h-full" />
+          <KPICard label="Wydajność" value={kpi.performance} unit="%" icon={Gauge} color="blue" description="Prędkość rzeczywista" tooltip="Porównanie średniej prędkości rzeczywistej z prędkością zadaną w planie produkcji." className="h-full" />
           <KPICard label="Przestoje" value={kpi.downtimeHours} unit={`h ${kpi.downtimeMinutes}m`} icon={Ban} color="rose" description="Suma strat czasowych" tooltip="Suma wszystkich okresów, w których linia nie zgłaszała sygnału pracy w trakcie trwania aktywnego zlecenia." decimals={0} className="h-full" />
         </div>
 
