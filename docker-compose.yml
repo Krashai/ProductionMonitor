@@ -10,8 +10,11 @@ services:
     volumes:
       - ./gateway/backend/config:/app/config
       - ./gateway/backend/app:/app/app
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     environment:
       - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
+      - TZ=Europe/Warsaw
     depends_on:
       dashboard-db:
         condition: service_healthy
@@ -24,6 +27,11 @@ services:
     container_name: pm-gateway-frontend
     ports:
       - "3000:80"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      - TZ=Europe/Warsaw
     networks:
       - prod_net
     depends_on:
@@ -39,10 +47,13 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: line_gantt
       TS_TUNE: "off"
+      TZ: Europe/Warsaw
     ports:
       - "5432:5432"
     volumes:
       - dashboard_pgdata:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     networks:
       - prod_net
     healthcheck:
@@ -66,9 +77,12 @@ services:
       - ./dashboard:/app
       - /app/node_modules
       - /app/.next
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     environment:
       - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
       - NODE_ENV=development
+      - TZ=Europe/Warsaw
     networks:
       - prod_net
     restart: always
