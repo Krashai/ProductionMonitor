@@ -66,27 +66,20 @@ services:
   dashboard-app:
     build:
       context: ./dashboard
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile.prod
     container_name: pm-dashboard-app
     depends_on:
       dashboard-db:
         condition: service_healthy
     ports:
       - "3001:3000"
-    volumes:
-      - ./dashboard:/app
-      - /app/node_modules
-      - /app/.next
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
     environment:
       - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
-      - NODE_ENV=development
+      - NODE_ENV=production
       - TZ=Europe/Warsaw
     networks:
       - prod_net
     restart: always
-    command: sh -c "npx prisma db push && npm run dev"
 
 networks:
   prod_net:
