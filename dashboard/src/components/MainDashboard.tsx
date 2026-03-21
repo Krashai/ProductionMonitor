@@ -2,13 +2,29 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { LineCard } from "./LineCard";
-import { Play, Pause, CalendarPlus } from "lucide-react";
+import { Play, Pause, CalendarPlus, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 
+interface Line {
+  id: string;
+  name: string;
+  plcId: string;
+  isOnline: boolean;
+  history: { status: boolean; speed: number; time: string }[];
+  plans: { id: string; productIndex: string }[];
+  _count: { scrap: number };
+}
+
+interface Hall {
+  id: string;
+  name: string;
+  lines: Line[];
+}
+
 interface Props {
-  halls: any[];
+  halls: Hall[];
 }
 
 export function MainDashboard({ halls }: Props) {
@@ -124,6 +140,14 @@ export function MainDashboard({ halls }: Props) {
             <CalendarPlus size={16} />
             <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Planowanie</span>
           </Link>
+
+          <Link 
+            href="/reporting" 
+            className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
+          >
+            <BarChart3 size={16} />
+            <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Raporty</span>
+          </Link>
         </div>
       </header>
 
@@ -137,7 +161,7 @@ export function MainDashboard({ halls }: Props) {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-          {currentHall?.lines?.map((line: any) => (
+          {currentHall?.lines?.map((line: Line) => (
             <LineCard key={line.id} line={line} />
           ))}
         </div>
