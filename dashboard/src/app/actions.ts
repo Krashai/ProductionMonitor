@@ -105,15 +105,125 @@ export async function addProductionPlan(data: {
 }
 
 /**
+ * Aktualizuje istniejące zlecenie
+ */
+export async function updateProductionPlan(id: string, data: {
+  productIndex?: string;
+  startTime?: Date;
+  endTime?: Date;
+  plannedSpeed?: number;
+  lineId?: string;
+}) {
+  try {
+    // Jeśli zmieniamy czasy lub linię, sprawdź kolizje (wykluczając obecny rekord)
+    if (data.startTime || data.endTime || data.lineId) {
+      const current = await prisma.productionPlan.findUnique({ where: { id } });
+      if (!current) return { success: false, error: 'Nie znaleziono planu.' };
+
+      const startTime = data.startTime || current.startTime;
+      const endTime = data.endTime || current.endTime;
+      const lineId = data.lineId || current.lineId;
+
+      const overlap = await prisma.productionPlan.findFirst({
+        where: {
+          id: { not: id },
+          lineId,
+          AND: [
+            { startTime: { lt: endTime } },
+            { endTime: { gt: startTime } }
+          ]
+        }
+      });
+
+      if (overlap) {
+        return { success: false, error: `Kolizja z indeksem ${overlap.productIndex}` };
+      }
+    }
+
+    const updated = await prisma.productionPlan.update({
+      where: { id },
+      data,
+    });
+
+    revalidatePath('/');
+    revalidatePath('/planning');
+    revalidatePath(`/line/${updated.lineId}`);
+    return { success: true, plan: updated };
+  } catch (error) {
+    console.error('Error updating production plan:', error);
+    return { success: false, error: 'Błąd podczas aktualizacji.' };
+  }
+}
+
+/**
+ * Usuwa zlecenie z planu
+ */
+export async function deleteProductionPlan(id: string) {
+  try {
+    const deleted = await prisma.productionPlan.delete({
+      where: { id },
+    });
+    revalidatePath('/');
+    revalidatePath('/planning');
+    revalidatePath(`/line/${deleted.lineId}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting production plan:', error);
+    return { success: false, error: 'Nie udało się usunąć zlecenia.' };
+  }
+}
+
+/**
+ * Pobiera wszystkie plany dla wszystkich linii w danym zakresie
+ */
+export async function getAllProductionPlans(from: Date, to: Date) {
+  try {
+    const plans = await prisma.productionPlan.findMany({
+      where: {
+        OR: [
+          { startTime: { lte: to }, endTime: { gte: from } }
+        ]
+      },
+      include: {
+        line: {
+          select: { name: true, hall: { select: { name: true } } }
+        }
+      },
+      orderBy: { startTime: 'asc' }
+    });
+    return JSON.parse(JSON.stringify(plans));
+  } catch (error) {
+    console.error('Error fetching all plans:', error);
+    return [];
+  }
+}
+
+/**
  * Pobiera prostą listę wszystkich linii
  */
 export async function getLines() {
   try {
-    return await prisma.line.findMany({
-      select: { id: true, name: true, hall: { select: { name: true } } }
+    const lines = await prisma.line.findMany({
+      include: { hall: true }
     });
+    console.log(`Fetched ${lines.length} lines for dropdown.`);
+    return JSON.parse(JSON.stringify(lines));
   } catch (error) {
     console.error('Error fetching lines:', error);
+    return [];
+  }
+}
+
+/**
+ * Pobiera listę hal dla zakładek
+ */
+export async function getHalls() {
+  try {
+    return await prisma.hall.findMany({
+      orderBy: { name: 'asc' }
+    });
+  } catch (error) {
+    console.error('Error fetching halls:', error);
     return [];
   }
 }
