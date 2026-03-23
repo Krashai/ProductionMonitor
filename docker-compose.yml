@@ -16,8 +16,8 @@ services:
       - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
       - TZ=Europe/Warsaw
     depends_on:
-      dashboard-db:
-        condition: service_healthy
+      dashboard-db-init:
+        condition: service_completed_successfully
     networks:
       - prod_net
     restart: always
@@ -58,19 +58,38 @@ services:
       - prod_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d line_gantt"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 5
     restart: always
+
+  # USŁUGA INICJALIZUJĄCA BAZĘ (Zatrzymuje się po skończeniu)
+  dashboard-db-init:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.prod
+      target: builder
+    container_name: pm-dashboard-db-init
+    depends_on:
+      dashboard-db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
+    networks:
+      - prod_net
+    volumes:
+      - ./dashboard/init-db.sh:/app/init-db.sh
+    entrypoint: ["sh", "/app/init-db.sh"]
 
   dashboard-app:
     build:
       context: ./dashboard
       dockerfile: Dockerfile.prod
+      target: runner
     container_name: pm-dashboard-app
     depends_on:
-      dashboard-db:
-        condition: service_healthy
+      dashboard-db-init:
+        condition: service_completed_successfully
     ports:
       - "3001:3000"
     environment:

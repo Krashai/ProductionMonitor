@@ -52,13 +52,13 @@ const DATA = [
 const PRODUCTS = ['XJ-100', 'XJ-200', 'Y-ALPHA', 'Z-BETA', 'K-GAMMA', 'M-DELTA', 'OMEGA-7'];
 
 async function main() {
-  console.log('🧹 Cleaning up database...');
-  await prisma.productionPlan.deleteMany();
-  await prisma.machineStatusHistory.deleteMany();
-  await prisma.scrapEvent.deleteMany();
-  await prisma.downtimeComment.deleteMany();
-  await prisma.line.deleteMany();
-  await prisma.hall.deleteMany();
+  console.log('🌱 Checking if database needs seeding...');
+  
+  const hallCount = await prisma.hall.count();
+  if (hallCount > 0) {
+    console.log('⚠️ Database already contains data. Skipping seed to protect user changes.');
+    return;
+  }
 
   console.log('🌱 Seeding production halls and lines...');
 
