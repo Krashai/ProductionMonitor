@@ -469,35 +469,36 @@ async function getHallHourlyActivity(hallId: string, from: Date, to: Date) {
 }
 
 /**
- * Pomocnicza funkcja do statystyk linii
+ * Pomocnicza funkcja do statystyk linii (ZOPTYMALIZOWANA SQL)
  */
 async function getLineStats(lineId: string, from: Date, to: Date) {
-  // Scrap count
+  // 1. Scrap count (standardowe Prisma count jest ok z indeksem)
   const scrapCount = await prisma.scrapEvent.count({
     where: { lineId, time: { gte: from, lte: to } }
   });
 
-  // Historia statusów do obliczenia Availability
-  const history = await prisma.machineStatusHistory.findMany({
-    where: { lineId, time: { gte: from, lte: to } },
-    orderBy: { time: 'asc' }
-  });
+  // 2. Obliczanie Availability przy użyciu SQL (Funkcja okienkowa LEAD)
+  // To zapytanie oblicza różnicę czasu między wpisami bezpośrednio w bazie
+  const result = await prisma.$queryRaw<any[]>`
+    SELECT SUM(duration) as "workingTimeMs"
+    FROM (
+      SELECT 
+        status,
+        EXTRACT(EPOCH FROM (LEAD(time) OVER (ORDER BY time) - time)) * 1000 as duration
+      FROM machine_status_history
+      WHERE "lineId" = ${lineId} 
+        AND "time" >= ${from} 
+        AND "time" <= ${to}
+    ) sub
+    WHERE status = true;
+  `;
 
-  let workingTimeMs = 0;
-  if (history.length > 1) {
-    for (let i = 0; i < history.length - 1; i++) {
-      if (history[i].status) {
-        workingTimeMs += history[i+1].time.getTime() - history[i].time.getTime();
-      }
-    }
-  }
-
+  const workingTimeMs = Number(result[0]?.workingTimeMs || 0);
   const totalTimeMs = to.getTime() - from.getTime();
   const availability = totalTimeMs > 0 ? (workingTimeMs / totalTimeMs) * 100 : 0;
   
-  // Uproszczone OEE na potrzeby MVP (dostępność * jakość, gdzie jakość to 1 - scrap/produkcja)
-  // Przyjmujemy założenie o wydajności 100% jeśli brak planów
-  const oee = Math.min(100, availability); // TODO: Rozbudować o Performance i Quality
+  // Na razie uproszczone OEE (TODO: Performance i Quality)
+  const oee = Math.min(100, availability);
 
   return {
     scrapCount,
@@ -508,31 +509,35 @@ async function getLineStats(lineId: string, from: Date, to: Date) {
 }
 
 /**
- * Pomocnicza funkcja do wykrywania incydentów (przestojów > 10 min)
+ * Pomocnicza funkcja do wykrywania incydentów (ZOPTYMALIZOWANA SQL)
+ * Wykrywa przestoje > 10 min bezpośrednio w bazie danych.
  */
 async function getLineIncidents(lineId: string, from: Date, to: Date) {
-  const history = await prisma.machineStatusHistory.findMany({
-    where: { lineId, time: { gte: from, lte: to } },
-    orderBy: { time: 'asc' }
-  });
+  const THRESHOLD_SECONDS = 10 * 60; // 10 minut
 
-  const incidents = [];
-  const THRESHOLD_MS = 10 * 60 * 1000; // 10 minut
+  const incidents = await prisma.$queryRaw<any[]>`
+    SELECT 
+      time as "startTime",
+      next_time as "endTime",
+      duration * 1000 as "durationMs"
+    FROM (
+      SELECT 
+        time,
+        status,
+        LEAD(time) OVER (ORDER BY time) as next_time,
+        EXTRACT(EPOCH FROM (LEAD(time) OVER (ORDER BY time) - time)) as duration
+      FROM machine_status_history
+      WHERE "lineId" = ${lineId}
+        AND "time" >= ${from}
+        AND "time" <= ${to}
+    ) sub
+    WHERE status = false 
+      AND duration >= ${THRESHOLD_SECONDS};
+  `;
 
-  if (history.length > 1) {
-    for (let i = 0; i < history.length - 1; i++) {
-      if (!history[i].status) { // Przestój
-        const duration = history[i+1].time.getTime() - history[i].time.getTime();
-        if (duration >= THRESHOLD_MS) {
-          incidents.push({
-            startTime: history[i].time,
-            endTime: history[i+1].time,
-            durationMs: duration
-          });
-        }
-      }
-    }
-  }
-
-  return incidents;
+  return incidents.map(inc => ({
+    startTime: new Date(inc.startTime),
+    endTime: new Date(inc.endTime),
+    durationMs: Number(inc.durationMs)
+  }));
 }

@@ -69,7 +69,7 @@ model MachineStatusHistory {
   speed   Float
 
   @@id([id, time]) // Klucz kompozytowy dla TimescaleDB
-  @@index([time])
+  @@index([lineId, time(sort: Desc)])
   @@map("machine_status_history")
 }
 
@@ -81,7 +81,7 @@ model ScrapEvent {
   line   Line     @relation(fields: [lineId], references: [id])
 
   @@id([id, time]) // Klucz kompozytowy dla TimescaleDB
-  @@index([time])
+  @@index([lineId, time(sort: Desc)])
   @@map("scrap_events")
 }
 
