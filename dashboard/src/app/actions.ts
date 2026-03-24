@@ -1,40 +1,42 @@
 'use server'
 
 import { prisma } from '@/lib/prisma';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, unstable_cache } from 'next/cache';
 import { format } from 'date-fns';
 
 /**
  * Pobiera wszystkie hale wraz z liniami i ich aktualnym stanem
+ * ZOPTYMALIZOWANE CACHE'OWANIEM
  */
-export async function getHallsWithLines() {
-  const now = new Date();
-  try {
-    console.log('--- FETCHING HALLS START ---');
-    const halls = await prisma.hall.findMany({
-      include: {
-        lines: {
-          include: {
-            history: {
-              orderBy: [
-                { time: 'desc' },
-                { speed: 'desc' }
-              ],
-              take: 1,
-            },
-            plans: {
-              where: {
-                startTime: { lte: now },
-                endTime: { gte: now },
+export const getHallsWithLines = unstable_cache(
+  async () => {
+    const now = new Date();
+    try {
+      console.log('--- FETCHING HALLS START (DB QUERY) ---');
+      const halls = await prisma.hall.findMany({
+        include: {
+          lines: {
+            include: {
+              history: {
+                orderBy: [
+                  { time: 'desc' },
+                ],
+                take: 1,
               },
-              take: 1,
-            },
-            _count: {
-              select: {
-                scrap: {
-                  where: {
-                    time: {
-                      gte: new Date(Date.now() - 60 * 60 * 1000),
+              plans: {
+                where: {
+                  startTime: { lte: now },
+                  endTime: { gte: now },
+                },
+                take: 1,
+              },
+              _count: {
+                select: {
+                  scrap: {
+                    where: {
+                      time: {
+                        gte: new Date(Date.now() - 60 * 60 * 1000),
+                      },
                     },
                   },
                 },
@@ -42,17 +44,19 @@ export async function getHallsWithLines() {
             },
           },
         },
-      },
-    });
+      });
 
-    console.log(`--- FETCHED ${halls.length} HALLS ---`);
-    // Serializacja dat przed wysłaniem do Client Component
-    return JSON.parse(JSON.stringify(halls));
-  } catch (error) {
-    console.error('CRITICAL ERROR IN getHallsWithLines:', error);
-    return [];
-  }
-}
+      console.log(`--- FETCHED ${halls.length} HALLS ---`);
+      // Serializacja dat przed wysłaniem do Client Component
+      return JSON.parse(JSON.stringify(halls));
+    } catch (error) {
+      console.error('CRITICAL ERROR IN getHallsWithLines:', error);
+      return [];
+    }
+  },
+  ['halls-overview'],
+  { revalidate: 2, tags: ['halls-data'] } // Cache na 2 sekundy, tag do manualnej rewalidacji
+);
 
 /**
  * Dodaje nowe zlecenie do planu produkcji

@@ -83,8 +83,10 @@ class PLCWorker(threading.Thread):
         while self.running:
             start_time = time.time()
             has_db_line = self.find_line_id()
-
-            if self.connect():
+            
+            is_connected = self.connect()
+            
+            if is_connected:
                 try:
                     current_cycle_values = {}
                     dbs = {}
@@ -111,17 +113,21 @@ class PLCWorker(threading.Thread):
                     
                     self.config.online = True
                 except Exception as e:
-                    # print(f"ERROR: Wyjątek podczas odczytu {self.config.ip}: {e}", flush=True)
                     self.config.online = False
                     self.client.disconnect()
             
             if has_db_line:
                 self.update_online_status()
-                
-            self.broadcast_update()
+            
+            # Broadcast tylko gdy online lub przy zmianie statusu
+            if is_connected or self.config.online != self.last_db_online_status:
+                self.broadcast_update()
             
             elapsed = time.time() - start_time
-            sleep_time = max(0, self.poll_rate - elapsed)
+            
+            # Jeśli brak połączenia, czekaj dłużej (5s zamiast 1s)
+            dynamic_poll = self.poll_rate if is_connected else 5.0
+            sleep_time = max(0.1, dynamic_poll - elapsed)
             time.sleep(sleep_time)
 
     def sync_cycle_to_db(self, current_cycle):

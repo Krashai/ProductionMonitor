@@ -19,6 +19,9 @@ export function useRealtimeUpdates() {
     const es = new EventSource('/api/events');
     eventSourceRef.current = es;
 
+    let lastRefresh = 0;
+    const REFRESH_THRESHOLD = 2000; // max raz na 2 sekundy
+
     es.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -28,9 +31,14 @@ export function useRealtimeUpdates() {
           return;
         }
 
+        const now = Date.now();
+        if (now - lastRefresh < REFRESH_THRESHOLD) {
+          return;
+        }
+
         console.log(`🔔 Update received: ${data.type}`, data.lineId || '');
         
-        // Next.js refresh() pobiera świeże dane z Server Components bez przeładowania strony
+        lastRefresh = now;
         router.refresh();
       } catch (err) {
         console.error('❌ Error parsing SSE message:', err);
