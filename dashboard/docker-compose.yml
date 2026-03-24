@@ -14,7 +14,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
-      - gateway_net
+      - monitor_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d line_gantt"]
       interval: 10s
@@ -39,31 +39,11 @@ services:
       - DATABASE_URL=postgresql://user:password@db:5432/line_gantt?schema=public
       - NODE_ENV=development
     networks:
-      - gateway_net
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    container_name: line-gantt-worker
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - .:/app
-      - /app/node_modules
-    command: ["./node_modules/.bin/tsx", "src/worker/index.ts"]
-    environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/line_gantt?schema=public
-      - MQTT_BROKER_URL=mqtt://10.10.0.244:1883
-    restart: always
-    networks:
-      - gateway_net
+      - monitor_net
 
 volumes:
   pgdata:
 
 networks:
-  gateway_net:
-    external: true
-    name: plcgateway_gateway_net
+  monitor_net:
+    driver: bridge

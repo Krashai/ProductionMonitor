@@ -1,3 +1,4 @@
+import requests
 import time
 import threading
 import asyncio
@@ -7,6 +8,15 @@ from app.plc.utils import decode_tag_value
 from app.api.websocket import manager as ws_manager
 from app.db.session import SessionLocal
 from app.db.models import Line, MachineStatusHistory, ScrapEvent
+
+# Pomocnicza funkcja do powiadomień
+def notify_dashboard(event_type: str, line_id: str):
+    try:
+        requests.post("http://dashboard-app:3000/api/notify", 
+                      json={"type": event_type, "lineId": line_id}, 
+                      timeout=0.5)
+    except:
+        pass
 
 class PLCWorker(threading.Thread):
     def __init__(self, config: PLCConfig, loop: asyncio.AbstractEventLoop, poll_rate: float = 1.0):
@@ -147,11 +157,15 @@ class PLCWorker(threading.Thread):
                     speed=final_speed
                 )
                 db.add(history_entry)
+                db.commit() # Commit tutaj, aby dashboard mógł od razu odczytać nowe dane
+                
+                notify_dashboard("LINE_UPDATE", str(self.line_internal_id))
                 
                 self.last_values['status_cache'] = final_status
                 self.last_values['speed_cache'] = final_speed
 
             # 2. Obsługa Scrap (Edge Detection)
+            scrap_added = False
             for tag_name, val in current_cycle.items():
                 if tag_name.lower() in ['scrap', 'scrap_pulse']:
                     is_pulse = str(val).lower() in ['true', '1']
@@ -162,10 +176,15 @@ class PLCWorker(threading.Thread):
                     if is_pulse and not last_pulse and self.last_values.get('status_cache', False):
                         scrap_event = ScrapEvent(lineId=self.line_internal_id)
                         db.add(scrap_event)
+                        scrap_added = True
                     
                     self.last_values[cache_key] = is_pulse
 
-            db.commit()
+            if scrap_added:
+                db.commit()
+                notify_dashboard("LINE_UPDATE", str(self.line_internal_id))
+            else:
+                db.commit()
         except Exception as e:
             # print(f"DB CYCLE WRITE ERROR for {self.config.id}: {e}", flush=True)
             db.rollback()

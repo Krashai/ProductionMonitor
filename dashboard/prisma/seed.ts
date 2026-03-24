@@ -80,7 +80,7 @@ async function main() {
     }
   }
 
-  console.log('✅ Seed finished. Database structure is ready for real MQTT data.');
+  console.log('✅ Seed finished. Database structure is ready for production data.');
 }
 
 main()

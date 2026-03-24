@@ -1,53 +1,24 @@
 # Project Design: LineGantt Dashboard
 
-System do wizualizacji statusu linii produkcyjnych w czasie rzeczywistym, łączący planowanie (Gantt) z danymi rzeczywistymi z maszyn (PLC S7 Gateway).
+## 🏗️ Architecture Overview
 
-## 🎯 Purpose & Scope
-- **Zasada działania:** Porównywanie planu produkcji (Schedule) z rzeczywistym stanem pracy maszyny (Actual status).
-- **Główny cel:** Natychmiastowa identyfikacja awarii i postojów na halach produkcyjnych oraz umożliwienie ich opisania przez użytkowników.
-- **Użytkownicy:** Operatorzy, Kierownicy Hal, Planuści.
+System LineGantt jest zaprojektowany jako modularny monolit bazodanowy (Shared Database Architecture).
 
-## 🏗️ Technical Stack (Docker-based)
-- **Frontend & API:** Next.js 14/15 (App Router, TypeScript).
-- **Baza Danych:** PostgreSQL + TimescaleDB (przechowywanie planów oraz historii statusów time-series).
-- **Ingestion:** Node.js MQTT Worker (lekki proces zbierający dane z PLC Gateway S7 i zrzucający je do bazy).
-- **Styling:** Tailwind CSS + Shadcn UI.
-- **Oś Czasu (Gantt):** Customowy komponent React oparty na CSS Grid lub bibliotece vis-timeline (z obsługą dynamicznego kolorowania bloków).
-- **ORM:** Prisma lub Drizzle.
+### Komponenty systemu:
+- **`dashboard-app`**: Aplikacja Next.js 15, która służy do wizualizacji danych i zarządzania planem produkcji.
+- **`dashboard-db`**: Baza danych PostgreSQL z rozszerzeniem **TimescaleDB**, zoptymalizowana pod kątem przechowywania serii czasowych (MachineStatusHistory).
+- **`plc-gateway`**: (Zewnętrzny moduł) Odpowiada za fizyczny odczyt danych z maszyn i zapisywanie ich bezpośrednio do `dashboard-db`.
 
-## 📡 Data Integration (MQTT S7 Gateway)
-- `plc/gate/data/{plc_id}/Status` (BOOL) -> 1: Running, 0: Stopped.
-- `plc/gate/data/{plc_id}/Speed` (REAL/INT) -> Prędkość rzeczywista.
-- `plc/gate/data/{plc_id}/Scrap_Pulse` (BOOL) -> Impuls (zbocze narastające) oznaczający zdarzenie SCRAP.
+## 📡 Data Strategy
 
-## 📱 User Experience & UI
-### 1. Widok Hal (High Level)
-- Podział na konkretne Hale produkcyjne.
-- Kafelki linii z ogólnym statusem (Kolor tła: Zielony/Czerwony/Żółty).
-- Szybki podgląd prędkości i liczniku Scrap.
+Zamiast stosować szynę danych typu MQTT, system polega na wydajnym modelu zapisu bezpośredniego do bazy serii czasowych:
 
-### 2. Widok Linii (Drill-down)
-- **Interaktywna Oś Czasu:** Blok planu produkcji (Indeks, Prędkość), który przesuwa się w prawo wraz z czasem ("Live").
-- **Kolorowanie Statusu:**
-    - Fragment bloku jest **Zielony**, gdy linia pracuje (Status=1).
-    - Fragment bloku jest **Czerwony**, gdy linia stoi (Status=0) w czasie trwania planowanego zlecenia.
-- **Opisy Awarrii:** Kliknięcie w czerwony fragment otwiera panel do dodania/edycji komentarza.
-- **Wykresy:** Dodatkowy graf prędkości i narastająca liczba zdarzeń Scrap.
+1. **Ingestion:** PLC Gateway odczytuje dane ze sterowników Siemens S7. Przy każdej zmianie istotnych parametrów (status, prędkość) wykonuje `INSERT` do tabeli `MachineStatusHistory`. Impulsy braków są zapisywane jako pojedyncze zdarzenia w `ScrapEvent`.
+2. **Persistence:** TimescaleDB automatycznie zarządza partycjonowaniem danych po czasie (hypertables), co pozwala na utrzymanie wysokiej wydajności przy milionach rekordów historii.
+3. **Visualization:** Dashboard odczytuje dane za pomocą Server Actions (Prisma). Wykorzystuje zaawansowane grupowanie po stronie SQL, aby wyliczać wskaźniki OEE i generować wykresy Gantta.
 
-### 3. Planowanie (Hybryda)
-- Formularz dodawania zlecenia (Indeks, Start, Duration, Plan_Speed).
-- Możliwość importu pliku Excel/CSV z tygodniowym planem.
+## 🛠️ Infrastructure
 
-## 🗄️ Data Model (Key Entities)
-- `Halls`: id, name.
-- `Lines`: id, hall_id, plc_id, name.
-- `ProductionPlan`: id, line_id, product_index, start_time, end_time, planned_speed.
-- `MachineStatusHistory` (TimescaleDB): time, line_id, status (bool), speed (float).
-- `ScrapEvents` (TimescaleDB): time, line_id.
-- `DowntimeComments`: id, line_id, start_time, end_time, comment.
-
-## 🚀 Docker Composition
-- `db`: TimescaleDB image.
-- `app`: Next.js (Node.js).
-- `worker`: MQTT Ingestion Service.
-- `mosquitto`: (Opcjonalnie) Lokalny broker MQTT.
+- **Docker:** Całe środowisko jest skonteneryzowane.
+- **Networking:** Moduły Dashboard i Gateway komunikują się przez wspólną sieć Dockerową, co zapewnia bezpieczeństwo (baza nie musi być wystawiona na świat).
+- **Caching:** Wykorzystanie wbudowanego mechanizmu cache'owania w Next.js z inwalidacją typu "on-demand" (wyzwalaną przez gateway po zmianach konfiguracji).

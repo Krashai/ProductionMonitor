@@ -42,11 +42,17 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
 
-def notify_dashboard():
-    """Informuje Dashboard o konieczności odświeżenia danych."""
+def notify_dashboard(event_type: str = "REVALIDATE", line_id: str = None):
+    """Informuje Dashboard o zmianie stanu linii lub konfiguracji."""
     try:
-        requests.post("http://dashboard-app:3000/api/revalidate", json={"path": "/"}, timeout=1)
-    except:
+        # Próbujemy uderzyć w nowy endpoint notify
+        payload = {"type": event_type}
+        if line_id:
+            payload["lineId"] = line_id
+            
+        requests.post("http://dashboard-app:3000/api/notify", json=payload, timeout=1)
+    except Exception as e:
+        # print(f"NOTIFICATION ERROR: {e}")
         pass
 
 @asynccontextmanager

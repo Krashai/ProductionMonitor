@@ -10,7 +10,6 @@ The system uses two physical network interfaces:
     *   **Purpose**: Communication with Siemens PLCs (S7 Protocol).
 2.  **USB Ethernet Adapter (`eth1`)**:
     *   **IP**: `10.10.0.244/24`
-    *   **Purpose**: Exposing gateway services (MQTT, API, Web UI) to the external network.
 
 ## Implemented Changes
 
@@ -25,7 +24,6 @@ The system uses two physical network interfaces:
 ### 3. Docker Service Isolation
 - Modified `docker-compose.yml` to bind specific services to the USB adapter IP (`10.10.0.244`).
 - **Port Bindings**:
-    - MQTT: `10.10.0.244:1883`
     - Backend API: `10.10.0.244:8000`
     - Frontend Web UI: `10.10.0.244:3000`
 
