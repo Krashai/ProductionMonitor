@@ -12,7 +12,7 @@ class Hall(Base):
     id = Column(String, primary_key=True, default=generate_cuid)
     name = Column(String, unique=True, nullable=False)
     createdAt = Column("createdAt", DateTime, server_default=func.now(), nullable=False)
-    updatedAt = Column("updatedAt", DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    updatedAt = Column("updatedAt", DateTime, default=func.now(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 class Line(Base):
     __tablename__ = "lines"
@@ -31,7 +31,7 @@ class Line(Base):
     tags = Column(JSON, default=[], nullable=False)
 
     createdAt = Column("createdAt", DateTime, default=func.now(), server_default=func.now(), nullable=False)
-    updatedAt = Column("updatedAt", DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    updatedAt = Column("updatedAt", DateTime, default=func.now(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 class ProductionPlan(Base):
     __tablename__ = "production_plans"
@@ -43,7 +43,7 @@ class ProductionPlan(Base):
     endTime = Column("endTime", DateTime, nullable=False)
     plannedSpeed = Column("plannedSpeed", Float, nullable=False)
     createdAt = Column("createdAt", DateTime, server_default=func.now(), nullable=False)
-    updatedAt = Column("updatedAt", DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    updatedAt = Column("updatedAt", DateTime, default=func.now(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 class MachineStatusHistory(Base):
     __tablename__ = "machine_status_history"
@@ -70,4 +70,4 @@ class DowntimeComment(Base):
     endTime = Column("endTime", DateTime, nullable=False)
     comment = Column(Text, nullable=False)
     createdAt = Column("createdAt", DateTime, server_default=func.now(), nullable=False)
-    updatedAt = Column("updatedAt", DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    updatedAt = Column("updatedAt", DateTime, default=func.now(), server_default=func.now(), onupdate=func.now(), nullable=False)
