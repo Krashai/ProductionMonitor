@@ -27,10 +27,20 @@ export default function LineDetailsPage({ params }: Props) {
   const to = subHours(now, -8);
 
   useEffect(() => {
-    // Pobieramy dane tylko raz przy montowaniu lub zmianie ID
+    const startTime = performance.now();
+    console.log(`[PERF] Fetching details for line ${id}...`);
+
     getLineDetails(id, from, to).then(data => {
+      const endTime = performance.now();
+      console.log(`[PERF] Data fetched in ${(endTime - startTime).toFixed(2)}ms`);
       setLine(data);
       setLoading(false);
+      
+      // RequestAnimationFrame zapewnia, że mierzymy czas po tym, jak przeglądarka miała szansę na render
+      requestAnimationFrame(() => {
+        const renderTime = performance.now();
+        console.log(`[PERF] Full page ready in ${(renderTime - startTime).toFixed(2)}ms`);
+      });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]); 

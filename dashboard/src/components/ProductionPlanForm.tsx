@@ -49,7 +49,7 @@ export function ProductionPlanForm({ lines, allPlans, initialData, onSuccess }: 
 
   // Filter plans for the currently selected line to show occupancy
   const linePlans = useMemo(() => {
-    return allPlans.filter(p => p.lineId === selectedLineId && p.id !== initialData?.id);
+    return (allPlans || []).filter(p => p.lineId === selectedLineId && p.id !== initialData?.id);
   }, [allPlans, selectedLineId, initialData]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>, ignoreWarning = false) {

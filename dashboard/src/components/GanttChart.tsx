@@ -340,6 +340,7 @@ export function GanttChart({ lines, initialPlans, halls }: Props) {
             <div className="p-10 max-h-[80vh] overflow-y-auto text-left">
               <ProductionPlanForm 
                 lines={lines} 
+                allPlans={plans}
                 initialData={{
                   ...editingPlan,
                   id: editingPlan.id,
