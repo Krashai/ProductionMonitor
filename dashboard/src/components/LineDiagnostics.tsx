@@ -38,6 +38,24 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
     return () => clearInterval(interval);
   }, []);
 
+  // --- PRZYGOTOWANIE DANYCH ---
+  const history = useMemo(() => initialHistory.map(h => ({
+    ...h,
+    time: new Date(h.time)
+  })), [initialHistory]);
+
+  const plans = useMemo(() => initialPlans.map(p => ({
+    ...p,
+    startTime: new Date(p.startTime),
+    endTime: new Date(p.endTime)
+  })), [initialPlans]);
+
+  const comments = useMemo(() => initialComments.map(c => ({
+    ...c,
+    startTime: new Date(c.startTime),
+    endTime: new Date(c.endTime)
+  })), [initialComments]);
+
   // --- LOGIKA KPI ---
   const kpi = useMemo(() => {
     let totalPlannedMinutes = 0;
@@ -45,40 +63,43 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
     let speedSum = 0;
     let speedCount = 0;
 
-    initialPlans.forEach(plan => {
-      const pStart = new Date(plan.startTime);
-      const pEnd = new Date(plan.endTime);
-      const rangeStart = pStart < from ? from : pStart;
-      const rangeEnd = pEnd > now ? now : pEnd;
+    plans.forEach(plan => {
+      const rangeStart = plan.startTime < from ? from : plan.startTime;
+      const rangeEnd = plan.endTime > now ? now : plan.endTime;
       
       if (rangeStart < rangeEnd) {
-        const plannedDiff = differenceInMinutes(rangeEnd, rangeStart);
-        totalPlannedMinutes += isNaN(plannedDiff) ? 0 : plannedDiff;
+        totalPlannedMinutes += differenceInMinutes(rangeEnd, rangeStart);
         
-        const historyInPlan = initialHistory
-          .filter(h => {
-            const hTime = new Date(h.time);
-            return hTime >= rangeStart && hTime <= rangeEnd;
-          })
-          .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+        // Znajdujemy stan początkowy (ostatni wpis przed lub w momencie rangeStart)
+        const initialIndex = history.findLastIndex(h => h.time <= rangeStart);
+        let currentStatus = initialIndex !== -1 ? history[initialIndex].status : false;
+        let currentSpeed = initialIndex !== -1 ? history[initialIndex].speed : 0;
 
-        for (let i = 0; i < historyInPlan.length; i++) {
-          const h = historyInPlan[i];
-          const nextH = historyInPlan[i+1];
-          const startTime = new Date(h.time);
-          const endTime = nextH ? new Date(nextH.time) : rangeEnd;
+        // Bierzemy wszystkie zdarzenia wewnątrz tego planu
+        const eventsInPlan = history.filter(h => h.time > rangeStart && h.time <= rangeEnd);
+        
+        // Tworzymy listę punktów kontrolnych: [rangeStart, ...events, rangeEnd]
+        const checkPoints = [
+          { time: rangeStart, status: currentStatus, speed: currentSpeed },
+          ...eventsInPlan,
+          { time: rangeEnd, status: currentStatus, speed: currentSpeed } // status/speed tutaj nie ma znaczenia dla ostatniego segmentu
+        ];
+
+        for (let i = 0; i < checkPoints.length - 1; i++) {
+          const start = checkPoints[i].time;
+          const end = checkPoints[i+1].time;
+          const status = checkPoints[i].status;
+          const speed = checkPoints[i].speed;
           
-          const durationMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60);
-          const validDuration = isNaN(durationMinutes) ? 0 : Math.max(0, durationMinutes);
+          const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
+          if (durationMinutes <= 0) continue;
 
-          if (h.status && h.speed > 0) {
-            actualWorkMinutes += validDuration;
-            
-            // Wydajność to stosunek prędkości rzeczywistej do zaplanowanej
-            const plannedSpeed = parseFloat(plan.plannedSpeed) || 1; // Unikaj dzielenia przez 0
-            const ratio = h.speed / plannedSpeed;
-            speedSum += Math.min(ratio, 1) * validDuration; 
-            speedCount += validDuration;
+          if (status && speed > 0) {
+            actualWorkMinutes += durationMinutes;
+            const plannedSpeed = parseFloat(plan.plannedSpeed) || 1;
+            const ratio = speed / plannedSpeed;
+            speedSum += Math.min(ratio, 1) * durationMinutes; 
+            speedCount += durationMinutes;
           }
         }
       }
@@ -97,11 +118,11 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
       downtimeHours,
       downtimeMinutes
     };
-  }, [initialPlans, initialHistory, from, now]);
+  }, [plans, history, from, now]);
 
   // --- LOGIKA OSI CZASU ---
   const getPosition = (date: Date) => {
-    const diff = differenceInMinutes(new Date(date), from);
+    const diff = (date.getTime() - from.getTime()) / (1000 * 60);
     return Math.max(0, Math.min(100, (diff / totalMinutes) * 100));
   };
 
@@ -112,32 +133,37 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
 
   // ALGORYTM UKŁADANIA W TORACH (LANES)
   const planLanes = useMemo(() => {
-    const segments = initialPlans.map(plan => {
+    const segments = plans.map(plan => {
       const segs: { start: Date; end: Date; type: 'running' | 'downtime' }[] = [];
-      const planStart = new Date(Math.max(new Date(plan.startTime).getTime(), from.getTime()));
-      const planEnd = new Date(Math.min(new Date(plan.endTime).getTime(), to.getTime()));
+      const planStart = plan.startTime < from ? from : plan.startTime;
+      const planEnd = plan.endTime > to ? to : plan.endTime;
+      
       if (planStart >= planEnd) return { ...plan, segments: [] };
-      let current = new Date(planStart);
+      
+      let current = planStart;
       while (current < planEnd) {
         const next = addMinutes(current, 15);
         const segmentEnd = next > planEnd ? planEnd : next;
-        const hasRunning = initialHistory.some(h => isWithinInterval(new Date(h.time), { start: current, end: segmentEnd }) && h.status === true);
-        segs.push({ start: new Date(current), end: new Date(segmentEnd), type: hasRunning ? 'running' : 'downtime' });
+        
+        // Szukamy ostatniego znanego statusu przed końcem tego segmentu
+        const lastEventIdx = history.findLastIndex(h => h.time <= segmentEnd);
+        const isActive = lastEventIdx !== -1 ? history[lastEventIdx].status : false;
+        
+        segs.push({ start: current, end: segmentEnd, type: isActive ? 'running' : 'downtime' });
         current = next;
       }
       return { ...plan, segments: segs };
     }).filter(p => p.segments.length > 0);
 
     // Sortowanie po czasie startu
-    segments.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    segments.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
 
     const lanes: any[][] = [];
     segments.forEach(plan => {
       let added = false;
       for (const lane of lanes) {
         const lastInLane = lane[lane.length - 1];
-        // Jeśli ten plan zaczyna się po zakończeniu ostatniego w tym torze (z marginesem 1 min)
-        if (new Date(plan.startTime) >= new Date(lastInLane.endTime)) {
+        if (plan.startTime >= lastInLane.endTime) {
           lane.push(plan);
           added = true;
           break;
@@ -146,11 +172,11 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
       if (!added) lanes.push([plan]);
     });
     return lanes;
-  }, [initialPlans, initialHistory, from, to]);
+  }, [plans, history, from, to]);
 
   // --- OBSŁUGA INTERAKCJI ---
   const handleEditClick = (comment: any) => {
-    setModalData({ start: new Date(comment.startTime), end: new Date(comment.endTime), existingId: comment.id });
+    setModalData({ start: comment.startTime, end: comment.endTime, existingId: comment.id });
     setCommentText(comment.comment);
     setActionChoice(null);
   };
@@ -232,10 +258,9 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
             {planLanes.map((lane, lIdx) => (
               <div key={lIdx} className="relative h-16 w-full">
                 {lane.map((plan, pIdx) => {
-                  const planStartPos = getPosition(new Date(plan.startTime));
-                  const planWidth = getPosition(new Date(plan.endTime)) - planStartPos;
+                  const planStartPos = getPosition(plan.startTime);
+                  const planWidth = getPosition(plan.endTime) - planStartPos;
                   
-                  // Etykiety są naprzemienne dla torów, aby uniknąć kolizji pionowej
                   const labelTop = lIdx % 2 === 0 ? "-top-8" : "-top-12";
                   const connectorHeight = lIdx % 2 === 0 ? "h-8" : "h-12";
 
@@ -247,28 +272,31 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
                       </div>
                       <div className="absolute inset-0 flex bg-slate-50/50 rounded-xl border border-slate-100 shadow-[inset_0_2px_10px_rgb(0,0,0,0.02)] overflow-visible z-10" onMouseUp={onMouseUp}>
                         {plan.segments.map((seg: any, idx: number) => {
-                          const width = ((getPosition(seg.start) - getPosition(seg.start)) / planWidth) * 100; // placeholder, actually we need the segment width
                           const segWidth = ((getPosition(seg.end) - getPosition(seg.start)) / planWidth) * 100;
                           
-                          const matchingComments = initialComments.filter(c => {
-                            const cStart = new Date(c.startTime);
-                            const cEnd = new Date(c.endTime);
-                            return (cStart <= seg.start && cEnd >= seg.end) || (isWithinInterval(cStart, { start: seg.start, end: seg.end }));
+                          const matchingComments = comments.filter(c => {
+                            return (c.startTime <= seg.start && c.endTime >= seg.end) || (isWithinInterval(c.startTime, { start: seg.start, end: seg.end }));
                           });
                           const isBeingSelected = selectionRange && isWithinInterval(seg.start, { start: selectionRange.start, end: selectionRange.end });
                           const shouldShowDot = matchingComments.some(c => {
-                            const midTime = new Date((new Date(c.startTime).getTime() + new Date(c.endTime).getTime()) / 2);
+                            const midTime = new Date((c.startTime.getTime() + c.endTime.getTime()) / 2);
                             return isWithinInterval(midTime, { start: seg.start, end: seg.end });
                           });
 
+                          const isFuture = seg.start > now;
+                          
                           return (
                             <div key={idx}
                               onMouseDown={(e) => onMouseDown(e, seg.start, seg.type, matchingComments)}
                               onMouseEnter={() => onMouseMove({ clientX: 0, clientY: 0 } as any, seg.start)}
                               className={cn(
                                 "h-full border-r border-white/5 last:border-0 relative transition-all group/seg",
-                                seg.type === 'running' ? "bg-emerald-500" : "bg-rose-500 cursor-crosshair hover:brightness-110 shadow-inner",
-                                isBeingSelected && "ring-4 ring-blue-400 ring-inset z-[60] brightness-125",
+                                isFuture 
+                                  ? "bg-slate-200 cursor-default" 
+                                  : seg.type === 'running' 
+                                    ? "bg-emerald-500" 
+                                    : "bg-rose-500 cursor-crosshair hover:brightness-110 shadow-inner",
+                                isBeingSelected && !isFuture && "ring-4 ring-blue-400 ring-inset z-[60] brightness-125",
                                 shouldShowDot && "after:absolute after:top-1/2 after:left-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:w-2.5 after:h-2.5 after:bg-white after:rounded-full after:shadow-lg after:border-2 after:border-rose-500"
                               )}
                               style={{ width: `${segWidth}%` }}
@@ -278,7 +306,7 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
                                 <div className="absolute opacity-0 group-hover/seg:opacity-100 transition-opacity bottom-full left-0 z-[100] pb-4 pointer-events-none min-w-[280px]">
                                   <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-2xl border border-slate-800 space-y-3 text-left">
                                     <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-1"><div className="flex items-center gap-2"><MessageSquareText size={16} className="text-blue-400" /><span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Analiza Przestoju</span></div><PencilLine size={14} className="text-slate-500" /></div>
-                                    {matchingComments.map((c, i) => <div key={i} className="space-y-1 border-b border-white/5 last:border-0 pb-2 last:pb-0 text-left"><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{format(new Date(c.startTime), 'HH:mm', { locale: pl })} - {format(new Date(c.endTime), 'HH:mm', { locale: pl })}</p><p className="text-sm font-semibold italic text-slate-100">"{c.comment}"</p></div>)}
+                                    {matchingComments.map((c, i) => <div key={i} className="space-y-1 border-b border-white/5 last:border-0 pb-2 last:pb-0 text-left"><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{format(c.startTime, 'HH:mm', { locale: pl })} - {format(c.endTime, 'HH:mm', { locale: pl })}</p><p className="text-sm font-semibold italic text-slate-100">"{c.comment}"</p></div>)}
                                   </div>
                                   <div className="w-4 h-4 bg-slate-900 rotate-45 absolute bottom-2 left-6"></div>
                                 </div>
@@ -308,21 +336,21 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
           <div className="bg-white border border-slate-200 rounded-[2.5rem] shadow-sm overflow-hidden flex flex-col h-full">
             <div className="p-6 border-b border-slate-50 bg-slate-50/30 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3"><div className="p-2 bg-slate-900 rounded-lg text-white"><History size={16} /></div><h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-900">Log Zdarzeń</h3></div>
-              <span className="bg-slate-100 text-slate-500 text-[10px] font-black px-3 py-1 rounded-full border border-slate-200">{initialComments.length}</span>
+              <span className="bg-slate-100 text-slate-500 text-[10px] font-black px-3 py-1 rounded-full border border-slate-200">{comments.length}</span>
             </div>
             <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar bg-white">
-              {initialComments.length === 0 ? (
+              {comments.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-200 gap-4"><MessageSquareText size={48} strokeWidth={1} /><p className="text-[10px] font-black uppercase tracking-[0.2em]">Brak opisanych awarii</p></div>
               ) : (
-                [...initialComments].reverse().map((c) => (
+                [...comments].reverse().map((c) => (
                   <div key={c.id} onClick={() => handleEditClick(c)} className="relative pl-8 py-1 group border-l-2 border-slate-100 hover:border-blue-500 transition-colors cursor-pointer text-left">
                     <div className="flex items-center justify-between mb-3 text-left">
                       <div className="flex items-center gap-3 text-left">
-                        <span className="text-[14px] font-black text-slate-900 font-mono tracking-tight">{format(new Date(c.startTime), 'HH:mm', { locale: pl })}</span>
+                        <span className="text-[14px] font-black text-slate-900 font-mono tracking-tight">{format(c.startTime, 'HH:mm', { locale: pl })}</span>
                         <span className="text-slate-300">—</span>
-                        <span className="text-[14px] font-black text-slate-900 font-mono tracking-tight">{format(new Date(c.endTime), 'HH:mm', { locale: pl })}</span>
+                        <span className="text-[14px] font-black text-slate-900 font-mono tracking-tight">{format(c.endTime, 'HH:mm', { locale: pl })}</span>
                       </div>
-                      <span className="text-[9px] font-black bg-rose-50 text-rose-600 px-2 py-0.5 rounded uppercase tracking-widest border border-rose-100">{differenceInMinutes(new Date(c.endTime), new Date(c.startTime))} min</span>
+                      <span className="text-[9px] font-black bg-rose-50 text-rose-600 px-2 py-0.5 rounded uppercase tracking-widest border border-rose-100">{differenceInMinutes(c.endTime, c.startTime)} min</span>
                     </div>
                     <p className="text-[16px] font-medium text-slate-600 leading-relaxed italic group-hover:text-slate-900 transition-colors">"{c.comment}"</p>
                     <div className="absolute left-[-6px] top-2 w-2.5 h-2.5 rounded-full bg-white border-2 border-slate-200 group-hover:border-blue-500 transition-colors shadow-sm"></div>

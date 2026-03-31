@@ -11,6 +11,8 @@ import { format } from 'date-fns';
 export const getHallsWithLines = unstable_cache(
   async () => {
     const now = new Date();
+    const recentThreshold = new Date(now.getTime() - 5 * 60 * 1000); // 5 minut wstecz
+
     try {
       console.log('--- FETCHING HALLS START (DB QUERY) ---');
       const halls = await prisma.hall.findMany({
@@ -234,10 +236,11 @@ export async function getHalls() {
 
 /**
  * Pobiera szczegółowe dane linii dla osi czasu
+ * ZOPTYMALIZOWANE: Pobiera tylko zmiany stanu (status/speed), nie wszystkie punkty
  */
 export async function getLineDetails(lineId: string, from: Date, to: Date) {
   try {
-    const line = await prisma.line.findUnique({
+    const linePromise = prisma.line.findUnique({
       where: { id: lineId },
       include: {
         plans: {
@@ -247,12 +250,6 @@ export async function getLineDetails(lineId: string, from: Date, to: Date) {
             ]
           },
           orderBy: { startTime: 'asc' }
-        },
-        history: {
-          where: {
-            time: { gte: from, lte: to }
-          },
-          orderBy: { time: 'asc' }
         },
         scrap: {
           where: {
@@ -269,7 +266,54 @@ export async function getLineDetails(lineId: string, from: Date, to: Date) {
       }
     });
 
-    return line;
+    // Pobieramy historię za pomocą SQL, filtrując tylko zmiany
+    // Dodajemy też stan początkowy (ostatni punkt przed "from"), aby oś czasu wiedziała od czego zacząć
+    const historyPromise = prisma.$queryRaw<any[]>`
+      WITH raw_history AS (
+        -- Punkt początkowy (stan tuż przed zakresem)
+        (
+          SELECT "id", "time", "status", "speed"
+          FROM machine_status_history
+          WHERE "lineId" = ${lineId} AND "time" < ${from}
+          ORDER BY "time" DESC
+          LIMIT 1
+        )
+        UNION ALL
+        -- Punkty w zakresie
+        (
+          SELECT "id", "time", "status", "speed"
+          FROM machine_status_history
+          WHERE "lineId" = ${lineId} AND "time" >= ${from} AND "time" <= ${to}
+          ORDER BY "time" ASC
+        )
+      ),
+      changes AS (
+        SELECT 
+          "id", "time", "status", "speed",
+          LAG("status") OVER (ORDER BY "time") as "prev_status",
+          LAG("speed") OVER (ORDER BY "time") as "prev_speed"
+        FROM raw_history
+      )
+      SELECT "id", "time", "status", "speed"
+      FROM changes
+      WHERE "prev_status" IS NULL 
+         OR "status" IS DISTINCT FROM "prev_status"
+         OR ABS("speed" - "prev_speed") >= 0.5
+      ORDER BY "time" ASC;
+    `;
+
+    const [line, history] = await Promise.all([linePromise, historyPromise]);
+
+    if (!line) return null;
+
+    return {
+      ...line,
+      history: history.map(h => ({
+        ...h,
+        // Konwersja dla kompatybilności z Prisma types
+        time: h.time.toISOString() 
+      }))
+    };
   } catch (error) {
     console.error('Error fetching line details:', error);
     return null;
@@ -362,20 +406,29 @@ export async function getReportingData(from: Date, to: Date) {
         };
       }));
 
-      // Agregacja na poziomie hali
+      // Agregacja na poziomie hali (tylko dla linii, które miały plan lub pracowały)
+      const plannedLines = lineReports.filter(l => !l.stats.isUnplanned);
+      const prevPlannedLines = lineReports.filter(l => !l.prevStats.isUnplanned);
+
       const totalIncidents = lineReports.reduce((acc, l) => acc + l.incidents.length, 0);
       const commentedIncidents = lineReports.reduce((acc, l) => 
         acc + l.incidents.filter(i => i.comment).length, 0);
 
       const hallStats = {
-        avgOee: lineReports.reduce((acc, l) => acc + l.stats.oee, 0) / (lineReports.length || 1),
+        avgOee: plannedLines.length > 0 
+          ? plannedLines.reduce((acc, l) => acc + l.stats.oee, 0) / plannedLines.length 
+          : 0,
         totalScrap: lineReports.reduce((acc, l) => acc + l.stats.scrapCount, 0),
-        avgAvailability: lineReports.reduce((acc, l) => acc + l.stats.availability, 0) / (lineReports.length || 1),
+        avgAvailability: plannedLines.length > 0
+          ? plannedLines.reduce((acc, l) => acc + l.stats.availability, 0) / plannedLines.length
+          : 0,
         integrityScore: totalIncidents > 0 ? (commentedIncidents / totalIncidents) * 100 : 100,
       };
 
       const prevHallStats = {
-        avgOee: lineReports.reduce((acc, l) => acc + l.prevStats.oee, 0) / (lineReports.length || 1),
+        avgOee: prevPlannedLines.length > 0
+          ? prevPlannedLines.reduce((acc, l) => acc + l.prevStats.oee, 0) / prevPlannedLines.length
+          : 0,
         totalScrap: lineReports.reduce((acc, l) => acc + l.prevStats.scrapCount, 0),
       };
 
@@ -409,15 +462,22 @@ export async function getReportingData(from: Date, to: Date) {
 
     // AGREGACJA GLOBALNA (DLA CAŁEJ FABRYKI)
     const allLines = reportData.flatMap(h => h.lines);
+    const allPlannedLines = allLines.filter(l => !l.stats.isUnplanned);
+    const allPrevPlannedLines = allLines.filter(l => !l.prevStats.isUnplanned);
+
     const factorySummary = {
-      avgOee: allLines.reduce((acc, l) => acc + l.stats.oee, 0) / (allLines.length || 1),
+      avgOee: allPlannedLines.length > 0
+        ? allPlannedLines.reduce((acc, l) => acc + l.stats.oee, 0) / allPlannedLines.length
+        : 0,
       totalScrap: allLines.reduce((acc, l) => acc + l.stats.scrapCount, 0),
-      prevAvgOee: allLines.reduce((acc, l) => acc + l.prevStats.oee, 0) / (allLines.length || 1),
+      prevAvgOee: allPrevPlannedLines.length > 0
+        ? allPrevPlannedLines.reduce((acc, l) => acc + l.prevStats.oee, 0) / allPrevPlannedLines.length
+        : 0,
       healthDistribution: {
-        green: allLines.filter(l => l.stats.oee > 85).length,
-        yellow: allLines.filter(l => l.stats.oee <= 85 && l.stats.oee >= 60).length,
-        red: allLines.filter(l => l.stats.oee < 60).length,
-        total: allLines.length
+        green: allPlannedLines.filter(l => l.stats.oee > 85).length,
+        yellow: allPlannedLines.filter(l => l.stats.oee <= 85 && l.stats.oee >= 60).length,
+        red: allPlannedLines.filter(l => l.stats.oee < 60).length,
+        total: allPlannedLines.length
       }
     };
 
@@ -476,72 +536,174 @@ async function getHallHourlyActivity(hallId: string, from: Date, to: Date) {
  * Pomocnicza funkcja do statystyk linii (ZOPTYMALIZOWANA SQL)
  */
 async function getLineStats(lineId: string, from: Date, to: Date) {
-  // 1. Scrap count (standardowe Prisma count jest ok z indeksem)
-  const scrapCount = await prisma.scrapEvent.count({
-    where: { lineId, time: { gte: from, lte: to } }
+  // 1. Pobieramy plany produkcyjne w tym zakresie (przycięte do granic from/to i NOW)
+  const plans = await prisma.productionPlan.findMany({
+    where: {
+      lineId,
+      startTime: { lt: to },
+      endTime: { gt: from },
+    }
   });
 
-  // 2. Obliczanie Availability przy użyciu SQL (Funkcja okienkowa LEAD)
-  // To zapytanie oblicza różnicę czasu między wpisami bezpośrednio w bazie
-  const result = await prisma.$queryRaw<any[]>`
-    SELECT SUM(duration) as "workingTimeMs"
-    FROM (
-      SELECT 
-        status,
-        EXTRACT(EPOCH FROM (LEAD(time) OVER (ORDER BY time) - time)) * 1000 as duration
-      FROM machine_status_history
-      WHERE "lineId" = ${lineId} 
-        AND "time" >= ${from} 
-        AND "time" <= ${to}
-    ) sub
-    WHERE status = true;
-  `;
-
-  const workingTimeMs = Number(result[0]?.workingTimeMs || 0);
-  const totalTimeMs = to.getTime() - from.getTime();
-  const availability = totalTimeMs > 0 ? (workingTimeMs / totalTimeMs) * 100 : 0;
+  const now = new Date();
+  let totalPlannedTimeMs = 0;
   
-  // Na razie uproszczone OEE (TODO: Performance i Quality)
-  const oee = Math.min(100, availability);
+  // Obliczamy całkowity zaplanowany czas (mianownik OEE)
+  plans.forEach(p => {
+    const start = Math.max(p.startTime.getTime(), from.getTime());
+    const end = Math.min(p.endTime.getTime(), to.getTime(), now.getTime());
+    if (end > start) {
+      totalPlannedTimeMs += (end - start);
+    }
+  });
+
+  // 2. Scrap count (tylko w trakcie planów)
+  let scrapCount = 0;
+  if (plans.length > 0) {
+    const scrapResult = await prisma.scrapEvent.count({
+      where: {
+        lineId,
+        OR: plans.map(p => ({
+          time: {
+            gte: new Date(Math.max(p.startTime.getTime(), from.getTime())),
+            lte: new Date(Math.min(p.endTime.getTime(), to.getTime(), now.getTime()))
+          }
+        }))
+      }
+    });
+    scrapCount = scrapResult;
+  }
+
+  // 3. Obliczanie Working Time przy użyciu SQL (Tylko w oknach planów)
+  let workingTimeMs = 0;
+  if (totalPlannedTimeMs > 0) {
+    // Dla każdego segmentu planu liczymy czas pracy
+    for (const p of plans) {
+      const pStart = new Date(Math.max(p.startTime.getTime(), from.getTime()));
+      const pEnd = new Date(Math.min(p.endTime.getTime(), to.getTime(), now.getTime()));
+      
+      if (pEnd <= pStart) continue;
+
+      const result = await prisma.$queryRaw<any[]>`
+        WITH bounds AS (
+          SELECT ${pStart}::timestamptz as start_time, ${pEnd}::timestamptz as end_time
+        ),
+        initial_state AS (
+          SELECT status
+          FROM machine_status_history
+          WHERE "lineId" = ${lineId} AND "time" < (SELECT start_time FROM bounds)
+          ORDER BY "time" DESC
+          LIMIT 1
+        ),
+        timeline AS (
+          SELECT (SELECT start_time FROM bounds) as time, COALESCE((SELECT status FROM initial_state), false) as status
+          UNION ALL
+          SELECT "time", status
+          FROM machine_status_history
+          WHERE "lineId" = ${lineId} 
+            AND "time" >= (SELECT start_time FROM bounds) 
+            AND "time" <= (SELECT end_time FROM bounds)
+          UNION ALL
+          SELECT (SELECT end_time FROM bounds) as time, true as status
+        )
+        SELECT SUM(duration) as "workingTimeMs"
+        FROM (
+          SELECT
+            status,
+            EXTRACT(EPOCH FROM (LEAD(time) OVER (ORDER BY time) - time)) * 1000 as duration
+          FROM timeline
+        ) sub
+        WHERE status = true;
+      `;
+      workingTimeMs += Number(result[0]?.workingTimeMs || 0);
+    }
+  }
+
+  const availability = totalPlannedTimeMs > 0 ? (workingTimeMs / totalPlannedTimeMs) * 100 : 0;
+  const oee = Math.min(100, availability); // Na razie uproszczone
+
+  // Linia nieplanowana to taka, która nie miała zlecenia I nie pracowała
+  const isUnplanned = totalPlannedTimeMs === 0 && workingTimeMs === 0;
 
   return {
     scrapCount,
     workingTimeMs,
     availability,
-    oee
+    oee,
+    isUnplanned,
+    hasPlan: totalPlannedTimeMs > 0,
+    plannedTimeMs: totalPlannedTimeMs
   };
 }
 
 /**
- * Pomocnicza funkcja do wykrywania incydentów (ZOPTYMALIZOWANA SQL)
- * Wykrywa przestoje > 10 min bezpośrednio w bazie danych.
+ * Pomocnicza funkcja do wykrywania incydentów (TYLKO W TRAKCIE PLANU)
  */
 async function getLineIncidents(lineId: string, from: Date, to: Date) {
   const THRESHOLD_SECONDS = 10 * 60; // 10 minut
+  const now = new Date();
 
-  const incidents = await prisma.$queryRaw<any[]>`
-    SELECT 
-      time as "startTime",
-      next_time as "endTime",
-      duration * 1000 as "durationMs"
-    FROM (
+  // Pobieramy plany
+  const plans = await prisma.productionPlan.findMany({
+    where: {
+      lineId,
+      startTime: { lt: to },
+      endTime: { gt: from },
+    }
+  });
+
+  const allIncidents: any[] = [];
+
+  for (const p of plans) {
+    const pStart = new Date(Math.max(p.startTime.getTime(), from.getTime()));
+    const pEnd = new Date(Math.min(p.endTime.getTime(), to.getTime(), now.getTime()));
+    
+    if (pEnd <= pStart) continue;
+
+    const incidents = await prisma.$queryRaw<any[]>`
+      WITH bounds AS (
+        SELECT ${pStart}::timestamptz as start_time, ${pEnd}::timestamptz as end_time
+      ),
+      initial_state AS (
+        SELECT status
+        FROM machine_status_history
+        WHERE "lineId" = ${lineId} AND "time" < (SELECT start_time FROM bounds)
+        ORDER BY "time" DESC
+        LIMIT 1
+      ),
+      timeline AS (
+        SELECT (SELECT start_time FROM bounds) as time, COALESCE((SELECT status FROM initial_state), false) as status
+        UNION ALL
+        SELECT "time", status
+        FROM machine_status_history
+        WHERE "lineId" = ${lineId} 
+          AND "time" >= (SELECT start_time FROM bounds) 
+          AND "time" <= (SELECT end_time FROM bounds)
+        UNION ALL
+        SELECT (SELECT end_time FROM bounds) as time, true as status
+      )
       SELECT 
-        time,
-        status,
-        LEAD(time) OVER (ORDER BY time) as next_time,
-        EXTRACT(EPOCH FROM (LEAD(time) OVER (ORDER BY time) - time)) as duration
-      FROM machine_status_history
-      WHERE "lineId" = ${lineId}
-        AND "time" >= ${from}
-        AND "time" <= ${to}
-    ) sub
-    WHERE status = false 
-      AND duration >= ${THRESHOLD_SECONDS};
-  `;
+        time as "startTime",
+        next_time as "endTime",
+        duration * 1000 as "durationMs"
+      FROM (
+        SELECT 
+          time,
+          status,
+          LEAD(time) OVER (ORDER BY time) as next_time,
+          EXTRACT(EPOCH FROM (LEAD(time) OVER (ORDER BY time) - time)) as duration
+        FROM timeline
+      ) sub
+      WHERE status = false 
+        AND duration >= ${THRESHOLD_SECONDS};
+    `;
+    
+    allIncidents.push(...incidents.map(inc => ({
+      startTime: new Date(inc.startTime),
+      endTime: new Date(inc.endTime),
+      durationMs: Number(inc.durationMs)
+    })));
+  }
 
-  return incidents.map(inc => ({
-    startTime: new Date(inc.startTime),
-    endTime: new Date(inc.endTime),
-    durationMs: Number(inc.durationMs)
-  }));
+  return allIncidents;
 }

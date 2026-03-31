@@ -17,7 +17,7 @@ from app.core.security import (
 from app.plc.worker import PLCWorker
 from app.api.websocket import manager as ws_manager
 from app.db.session import SessionLocal, engine
-from app.db.models import Hall, Line, MachineStatusHistory, ScrapEvent, Base
+from app.db.models import Hall, Line, MachineStatusHistory, ScrapEvent, ProductionPlan, DowntimeComment, Base
 
 # Tworzenie tabel na starcie (jeśli nie istnieją)
 Base.metadata.create_all(bind=engine)
@@ -268,6 +268,9 @@ async def delete_plc(plc_id: str, current_user: User = Depends(get_current_user)
         # 2. Usuń historię i linię
         db.query(MachineStatusHistory).filter(MachineStatusHistory.lineId == db_line.id).delete()
         db.query(ScrapEvent).filter(ScrapEvent.lineId == db_line.id).delete()
+        db.query(ProductionPlan).filter(ProductionPlan.lineId == db_line.id).delete()
+        db.query(DowntimeComment).filter(DowntimeComment.lineId == db_line.id).delete()
+        
         db.delete(db_line)
         db.commit()
         

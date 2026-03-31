@@ -151,11 +151,20 @@ class PLCWorker(threading.Thread):
 
             # Jeśli coś się zmieniło, zapisujemy historyczny wpis
             status_changed = (new_status is not None and new_status != old_status)
-            speed_changed = (new_speed is not None and new_speed != old_speed)
+            
+            # Dodajemy deadband dla prędkości (np. 0.5 jednostki), aby uniknąć zapisu szumu
+            speed_changed = False
+            if new_speed is not None:
+                if old_speed is None:
+                    speed_changed = True
+                else:
+                    speed_changed = abs(new_speed - old_speed) >= 0.5
 
             if status_changed or speed_changed:
                 final_status = new_status if new_status is not None else (old_status or False)
                 final_speed = new_speed if new_speed is not None else (old_speed or 0.0)
+                
+                print(f"SYNCING to DB for {self.config.id}: status={final_status}, speed={final_speed}", flush=True)
                 
                 history_entry = MachineStatusHistory(
                     lineId=self.line_internal_id,
@@ -192,7 +201,9 @@ class PLCWorker(threading.Thread):
             else:
                 db.commit()
         except Exception as e:
-            # print(f"DB CYCLE WRITE ERROR for {self.config.id}: {e}", flush=True)
+            print(f"DB CYCLE WRITE ERROR for {self.config.id}: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             db.rollback()
         finally:
             db.close()

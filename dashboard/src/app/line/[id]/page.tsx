@@ -1,3 +1,5 @@
+'use client'
+
 import { getLineDetails } from "@/app/actions";
 import { notFound } from "next/navigation";
 import { LineDiagnostics } from "@/components/LineDiagnostics";
@@ -5,19 +7,35 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { subHours, format } from "date-fns";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useRealtimeUpdates } from "@/hooks/useRealtime";
+import { use, useEffect, useState } from "react";
 
 interface Props {
   params: Promise<{ id: string }>;
 }
 
-export default async function LineDetailsPage({ params }: Props) {
-  const { id } = await params;
+export default function LineDetailsPage({ params }: Props) {
+  const { id } = use(params);
+  const [line, setLine] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useRealtimeUpdates();
+
+  // Definiujemy daty w zasięgu komponentu, aby były dostępne w JSX
   const now = new Date();
   const from = subHours(now, 24);
   const to = subHours(now, -8);
 
-  const line = await getLineDetails(id, from, to);
+  useEffect(() => {
+    // Pobieramy dane tylko raz przy montowaniu lub zmianie ID
+    getLineDetails(id, from, to).then(data => {
+      setLine(data);
+      setLoading(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]); 
 
+  if (loading) return <div className="p-10 text-slate-400 italic">Ładowanie danych...</div>;
   if (!line) notFound();
 
   const latestStatus = line.history[line.history.length - 1]?.status;

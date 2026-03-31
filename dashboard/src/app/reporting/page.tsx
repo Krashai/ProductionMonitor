@@ -47,12 +47,15 @@ type LineReport = {
     workingTimeMs: number;
     availability: number;
     oee: number;
+    isUnplanned: boolean;
+    hasPlan: boolean;
   };
   prevStats: {
     scrapCount: number;
     workingTimeMs: number;
     availability: number;
     oee: number;
+    isUnplanned: boolean;
   };
   incidents: Incident[];
 };
@@ -388,10 +391,10 @@ export default function ReportingPage() {
                           <div className="space-y-4 pt-8 border-t border-slate-100">
                             <div className="flex items-center justify-between px-2 mb-2">
                               <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 px-2 border-l-2 border-blue-500 ml-1">Zestawienie Maszyn</h3>
-                              <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{hall.lines.length} Aktywnych jednostek</span>
+                              <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{hall.lines.filter(l => !l.stats.isUnplanned).length} Aktywnych jednostek</span>
                             </div>
                             <div className="grid grid-cols-1 gap-3">
-                              {hall.lines.map((line) => (
+                              {hall.lines.filter(l => !l.stats.isUnplanned).map((line) => (
                                 <div key={line.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-slate-200 transition-all duration-300 group/line">
                                   <div 
                                     onClick={() => toggleLine(line.id)}
