@@ -127,22 +127,21 @@ export function MainDashboard({ halls }: Props) {
             </span>
           </div>
 
-          <Link 
-            href="/planning" 
+          <Link
+            href="/planning"
             className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
           >
             <CalendarPlus size={16} />
-            <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Planowanie</span>
+            <span className="text-[10px] font-black uppercase tracking-widest">Planowanie</span>
           </Link>
 
-          <Link 
-            href="/reporting" 
+          <Link
+            href="/reporting"
             className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
           >
             <BarChart3 size={16} />
-            <span className="text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">Raporty</span>
-          </Link>
-        </div>
+            <span className="text-[10px] font-black uppercase tracking-widest">Raporty</span>
+          </Link>        </div>
       </header>
 
       {/* TREŚĆ - KAFELKI */}

@@ -131,23 +131,23 @@ export default function ReportingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] pb-20 font-sans text-slate-900 leading-normal tracking-normal">
+    <div className="min-h-screen bg-slate-50/30 pb-20 font-sans text-slate-900 leading-normal tracking-normal">
       {/* NAGŁÓWEK */}
-      <header className="sticky top-0 bg-white/90 backdrop-blur-md border-b border-slate-100 z-50 mb-8">
-        <div className="max-w-[1600px] mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="p-2 hover:bg-slate-50 rounded-xl transition-all text-slate-400 hover:text-slate-900 border border-transparent hover:border-slate-100">
-              <ArrowLeft size={18} />
-            </Link>
-            <div className="space-y-0">
-              <h1 className="text-xl font-black tracking-tight uppercase leading-none">
-                Centrum Raportowania
-              </h1>
-              <p className="text-[9px] font-bold text-blue-600 uppercase tracking-widest mt-1">Global Manufacturing Insights</p>
-            </div>
-          </div>
+      <header className="max-w-[1600px] mx-auto px-8 pt-12 pb-8 flex flex-col gap-8">
+        <Link 
+          href="/" 
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
+        >
+          <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
+          <span className="text-xs font-bold uppercase tracking-widest">Wróć do monitora</span>
+        </Link>
 
-          <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-4xl font-black tracking-tighter uppercase text-slate-900">
+            Raporty
+          </h1>
+
+          <div className="flex items-center gap-4 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-xl gap-0.5">
               {PRESETS.map((preset) => (
                 <button
