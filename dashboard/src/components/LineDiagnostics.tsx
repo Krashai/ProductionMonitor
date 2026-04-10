@@ -8,6 +8,38 @@ import { addDowntimeComment, updateDowntimeComment } from '@/app/actions';
 import { X, Send, AlertCircle, MousePointer2, MessageSquareText, PencilLine, Plus, Timer, Gauge, Ban, History, Activity } from 'lucide-react';
 import { KPICard } from './KPICard';
 
+type HistoryEntry = { time: string | Date; status: boolean; speed: number | string | null; _time: number };
+type Segment = { start: Date; end: Date; type: 'running' | 'downtime' };
+
+// Binary search: ostatni indeks taki że sortedHistory[i]._time <= targetMs, lub -1.
+// Kluczowe dla carry-forward — dane są sparse (zapis tylko przy zmianie), więc
+// stan na dowolny moment = stan ostatniego wpisu przed tym momentem.
+function findAnchorIndex(sortedHistory: HistoryEntry[], targetMs: number): number {
+  let lo = 0, hi = sortedHistory.length - 1, result = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedHistory[mid]._time <= targetMs) {
+      result = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return result;
+}
+
+// Dokleja segment do listy, scalając z poprzednim jeśli ten sam typ i stykają się.
+function pushSegment(segs: Segment[], startMs: number, endMs: number, running: boolean) {
+  if (endMs <= startMs) return;
+  const type: 'running' | 'downtime' = running ? 'running' : 'downtime';
+  const last = segs[segs.length - 1];
+  if (last && last.type === type && last.end.getTime() === startMs) {
+    last.end = new Date(endMs);
+  } else {
+    segs.push({ start: new Date(startMs), end: new Date(endMs), type });
+  }
+}
+
 interface Props {
   lineId: string;
   initialPlans: any[];
@@ -38,55 +70,68 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
     return () => clearInterval(interval);
   }, []);
 
+  // Jedno sortowanie historii (z precomputed _time) używane przez KPI i planLanes.
+  // initialHistory zawiera zakotwiczenie (wpis sprzed okna) dodane przez getLineDetails —
+  // dzięki temu carry-forward działa też dla linii bez zmian stanu w oknie.
+  const sortedHistory = useMemo<HistoryEntry[]>(
+    () =>
+      [...initialHistory]
+        .map((h) => ({ ...h, _time: new Date(h.time).getTime() }))
+        .sort((a, b) => a._time - b._time),
+    [initialHistory],
+  );
+
   // --- LOGIKA KPI ---
+  // Carry-forward: dane są sparse, więc dla każdego planu bierzemy stan "zakotwiczony"
+  // w ostatnim wpisie <= rangeStart i iterujemy przez zmiany wewnątrz zakresu.
+  // Bez tego KPI ignorowało czas od rangeStart do pierwszej zmiany wewnątrz okna —
+  // linia stabilnie pracująca miała Dostępność 0%.
   const kpi = useMemo(() => {
     let totalPlannedMinutes = 0;
     let actualWorkMinutes = 0;
     let speedSum = 0;
     let speedCount = 0;
 
-    initialPlans.forEach(plan => {
-      const pStart = new Date(plan.startTime);
-      const pEnd = new Date(plan.endTime);
-      const rangeStart = pStart < from ? from : pStart;
-      const rangeEnd = pEnd > now ? now : pEnd;
-      
-      if (rangeStart < rangeEnd) {
-        const plannedDiff = differenceInMinutes(rangeEnd, rangeStart);
-        totalPlannedMinutes += isNaN(plannedDiff) ? 0 : plannedDiff;
-        
-        const historyInPlan = initialHistory
-          .filter(h => {
-            const hTime = new Date(h.time);
-            return hTime >= rangeStart && hTime <= rangeEnd;
-          })
-          .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    for (const plan of initialPlans) {
+      const pStart = new Date(plan.startTime).getTime();
+      const pEnd = new Date(plan.endTime).getTime();
+      const rangeStart = Math.max(pStart, from.getTime());
+      const rangeEnd = Math.min(pEnd, now.getTime());
+      if (rangeStart >= rangeEnd) continue;
 
-        for (let i = 0; i < historyInPlan.length; i++) {
-          const h = historyInPlan[i];
-          const nextH = historyInPlan[i+1];
-          const startTime = new Date(h.time);
-          const endTime = nextH ? new Date(nextH.time) : rangeEnd;
-          
-          const durationMinutes = (endTime.getTime() - startTime.getTime()) / (1000 * 60);
-          const validDuration = isNaN(durationMinutes) ? 0 : Math.max(0, durationMinutes);
+      totalPlannedMinutes += (rangeEnd - rangeStart) / 60000;
+      const plannedSpeed = parseFloat(plan.plannedSpeed) || 1;
 
-          if (h.status && h.speed > 0) {
-            actualWorkMinutes += validDuration;
-            
-            // Wydajność to stosunek prędkości rzeczywistej do zaplanowanej
-            const plannedSpeed = parseFloat(plan.plannedSpeed) || 1; // Unikaj dzielenia przez 0
-            const ratio = h.speed / plannedSpeed;
-            speedSum += Math.min(ratio, 1) * validDuration; 
-            speedCount += validDuration;
-          }
-        }
+      const anchorIdx = findAnchorIndex(sortedHistory, rangeStart);
+      let currentStatus: boolean = anchorIdx >= 0 ? sortedHistory[anchorIdx].status === true : false;
+      let currentSpeed: number = anchorIdx >= 0 ? Number(sortedHistory[anchorIdx].speed) || 0 : 0;
+      let cursor = rangeStart;
+
+      const accumulate = (startMs: number, endMs: number, status: boolean, speed: number) => {
+        if (endMs <= startMs) return;
+        if (!status || speed <= 0) return;
+        const durationMinutes = (endMs - startMs) / 60000;
+        actualWorkMinutes += durationMinutes;
+        const ratio = speed / plannedSpeed;
+        speedSum += Math.min(ratio, 1) * durationMinutes;
+        speedCount += durationMinutes;
+      };
+
+      for (let i = Math.max(0, anchorIdx + 1); i < sortedHistory.length; i++) {
+        const h = sortedHistory[i];
+        if (h._time <= cursor) continue;
+        if (h._time >= rangeEnd) break;
+        accumulate(cursor, h._time, currentStatus, currentSpeed);
+        currentStatus = h.status === true;
+        currentSpeed = Number(h.speed) || 0;
+        cursor = h._time;
       }
-    });
+      accumulate(cursor, rangeEnd, currentStatus, currentSpeed);
+    }
 
     const availability = totalPlannedMinutes > 0 ? (actualWorkMinutes / totalPlannedMinutes) * 100 : 0;
     const performance = speedCount > 0 ? (speedSum / speedCount) * 100 : 0;
-    
+
     const downtimeTotal = Math.max(0, totalPlannedMinutes - actualWorkMinutes);
     const downtimeHours = Math.floor(downtimeTotal / 60);
     const downtimeMinutes = Math.round(downtimeTotal % 60);
@@ -95,9 +140,9 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
       availability: Math.min(availability, 100),
       performance: Math.min(performance, 100),
       downtimeHours,
-      downtimeMinutes
+      downtimeMinutes,
     };
-  }, [initialPlans, initialHistory, from, now]);
+  }, [initialPlans, sortedHistory, from, now]);
 
   // --- LOGIKA OSI CZASU ---
   const getPosition = (date: Date) => {
@@ -111,20 +156,31 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
   }, [from, to]);
 
   // ALGORYTM UKŁADANIA W TORACH (LANES)
+  // Carry-forward: zamiast testować "czy w 15-min oknie był wpis z status=true"
+  // (co dla stabilnie pracującej maszyny dawało fałszywe downtime'y, bo sparse-data
+  // nie zapisuje kolejnych cykli gdy nic się nie zmienia), bierzemy stan zakotwiczony
+  // w ostatnim wpisie <= planStart i budujemy segmenty na podstawie rzeczywistych zmian.
   const planLanes = useMemo(() => {
     const segments = initialPlans.map(plan => {
-      const segs: { start: Date; end: Date; type: 'running' | 'downtime' }[] = [];
-      const planStart = new Date(Math.max(new Date(plan.startTime).getTime(), from.getTime()));
-      const planEnd = new Date(Math.min(new Date(plan.endTime).getTime(), to.getTime()));
-      if (planStart >= planEnd) return { ...plan, segments: [] };
-      let current = new Date(planStart);
-      while (current < planEnd) {
-        const next = addMinutes(current, 15);
-        const segmentEnd = next > planEnd ? planEnd : next;
-        const hasRunning = initialHistory.some(h => isWithinInterval(new Date(h.time), { start: current, end: segmentEnd }) && h.status === true);
-        segs.push({ start: new Date(current), end: new Date(segmentEnd), type: hasRunning ? 'running' : 'downtime' });
-        current = next;
+      const segs: Segment[] = [];
+      const planStartMs = Math.max(new Date(plan.startTime).getTime(), from.getTime());
+      const planEndMs = Math.min(new Date(plan.endTime).getTime(), to.getTime());
+      if (planStartMs >= planEndMs) return { ...plan, segments: [] };
+
+      const anchorIdx = findAnchorIndex(sortedHistory, planStartMs);
+      let currentStatus: boolean = anchorIdx >= 0 ? sortedHistory[anchorIdx].status === true : false;
+      let cursor = planStartMs;
+
+      for (let i = Math.max(0, anchorIdx + 1); i < sortedHistory.length; i++) {
+        const h = sortedHistory[i];
+        if (h._time <= cursor) continue;
+        if (h._time >= planEndMs) break;
+        pushSegment(segs, cursor, h._time, currentStatus);
+        currentStatus = h.status === true;
+        cursor = h._time;
       }
+      pushSegment(segs, cursor, planEndMs, currentStatus);
+
       return { ...plan, segments: segs };
     }).filter(p => p.segments.length > 0);
 
@@ -146,7 +202,7 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
       if (!added) lanes.push([plan]);
     });
     return lanes;
-  }, [initialPlans, initialHistory, from, to]);
+  }, [initialPlans, sortedHistory, from, to]);
 
   // --- OBSŁUGA INTERAKCJI ---
   const handleEditClick = (comment: any) => {

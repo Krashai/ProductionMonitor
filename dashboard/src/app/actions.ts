@@ -237,37 +237,53 @@ export async function getHalls() {
  */
 export async function getLineDetails(lineId: string, from: Date, to: Date) {
   try {
-    const line = await prisma.line.findUnique({
-      where: { id: lineId },
-      include: {
-        plans: {
-          where: {
-            OR: [
-              { startTime: { lte: to }, endTime: { gte: from } }
-            ]
+    // Carry-forward anchor: ostatni wpis z historii PRZED oknem. Bez niego
+    // linia stabilnie pracująca (brak zmian w oknie) byłaby traktowana jak
+    // brak danych — KPI i pasy planu fałszowane jako przestój.
+    const [line, anchor] = await Promise.all([
+      prisma.line.findUnique({
+        where: { id: lineId },
+        include: {
+          plans: {
+            where: {
+              OR: [
+                { startTime: { lte: to }, endTime: { gte: from } }
+              ]
+            },
+            orderBy: { startTime: 'asc' }
           },
-          orderBy: { startTime: 'asc' }
-        },
-        history: {
-          where: {
-            time: { gte: from, lte: to }
+          history: {
+            where: {
+              time: { gte: from, lte: to }
+            },
+            orderBy: { time: 'asc' }
           },
-          orderBy: { time: 'asc' }
-        },
-        scrap: {
-          where: {
-            time: { gte: from, lte: to }
-          }
-        },
-        comments: {
-          where: {
-            OR: [
-              { startTime: { lte: to }, endTime: { gte: from } }
-            ]
+          scrap: {
+            where: {
+              time: { gte: from, lte: to }
+            }
+          },
+          comments: {
+            where: {
+              OR: [
+                { startTime: { lte: to }, endTime: { gte: from } }
+              ]
+            }
           }
         }
-      }
-    });
+      }),
+      prisma.machineStatusHistory.findFirst({
+        where: {
+          lineId,
+          time: { lt: from }
+        },
+        orderBy: { time: 'desc' }
+      })
+    ]);
+
+    if (line && anchor) {
+      line.history = [anchor, ...line.history];
+    }
 
     return line;
   } catch (error) {
