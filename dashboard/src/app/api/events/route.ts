@@ -1,44 +1,85 @@
-import { eventEmitter } from '@/lib/events';
-import { NextRequest } from 'next/server';
+import { eventEmitter, type RealtimeEvent } from '@/lib/events'
+import { NextRequest } from 'next/server'
 
-export const dynamic = 'force-dynamic';
+export const dynamic = 'force-dynamic'
+
+// Na ProductionMonitorze może siedzieć kilkanaście-kilkadziesiąt dashboardów
+// jednocześnie. Domyślny MaxListeners=10 sypie ostrzeżeniami w logach.
+eventEmitter.setMaxListeners(1000)
+
+const HEARTBEAT_INTERVAL_MS = 15000
 
 /**
- * Endpoint GET /api/events
- * Utrzymuje połączenie SSE z przeglądarką
+ * GET /api/events
+ * Strumień SSE dla dashboardu.
+ *
+ * Niezawodność:
+ * - Wysyła heartbeat co 15s (komentarz SSE), żeby proxy/nginx nie ubił
+ *   bezczynnego połączenia po swoim timeoucie.
+ * - Sprząta listener i interval na abort / błąd zapisu.
  */
 export async function GET(req: NextRequest) {
-  const responseStream = new TransformStream();
-  const writer = responseStream.writable.getWriter();
-  const encoder = new TextEncoder();
+  const encoder = new TextEncoder()
 
-  // Funkcja wysyłająca wiadomość do klienta w formacie SSE
-  const sendEvent = (data: any) => {
-    const message = `data: ${JSON.stringify(data)}\n\n`;
-    writer.write(encoder.encode(message));
-  };
+  let heartbeat: ReturnType<typeof setInterval> | null = null
+  let onDataUpdate: ((event: RealtimeEvent) => void) | null = null
 
-  // Subskrybujemy nasz wewnętrzny emiter zdarzeń
-  const onDataUpdate = (event: any) => {
-    sendEvent(event);
-  };
+  const stream = new ReadableStream({
+    start(controller) {
+      const safeEnqueue = (chunk: string) => {
+        try {
+          controller.enqueue(encoder.encode(chunk))
+        } catch {
+          cleanup()
+        }
+      }
 
-  eventEmitter.on('data-update', onDataUpdate);
+      const sendEvent = (data: unknown) => {
+        safeEnqueue(`data: ${JSON.stringify(data)}\n\n`)
+      }
 
-  // Wysyłamy wiadomość powitalną (Keep-alive)
-  sendEvent({ type: 'CONNECTED', timestamp: new Date().toISOString() });
+      onDataUpdate = (event: RealtimeEvent) => {
+        sendEvent(event)
+      }
 
-  // Obsługa zamknięcia połączenia przez przeglądarkę
-  req.signal.addEventListener('abort', () => {
-    eventEmitter.off('data-update', onDataUpdate);
-    writer.close();
-  });
+      const cleanup = () => {
+        if (heartbeat) {
+          clearInterval(heartbeat)
+          heartbeat = null
+        }
+        if (onDataUpdate) {
+          eventEmitter.off('data-update', onDataUpdate)
+          onDataUpdate = null
+        }
+        try {
+          controller.close()
+        } catch {
+          /* noop — stream already closed */
+        }
+      }
 
-  return new Response(responseStream.readable, {
+      eventEmitter.on('data-update', onDataUpdate)
+
+      // Pakiet powitalny — pozwala klientowi wiedzieć, że kanał żyje.
+      sendEvent({ type: 'CONNECTED', timestamp: new Date().toISOString() })
+
+      // Heartbeat: ping co 15s. Format `: ...\n\n` to komentarz SSE,
+      // który trzyma połączenie otwarte bez wyzwalania onmessage.
+      heartbeat = setInterval(() => {
+        safeEnqueue(`: ping ${Date.now()}\n\n`)
+      }, HEARTBEAT_INTERVAL_MS)
+
+      req.signal.addEventListener('abort', cleanup)
+    },
+  })
+
+  return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
+      Connection: 'keep-alive',
+      // Wyłącza buforowanie w nginx (jeśli jest przed aplikacją).
+      'X-Accel-Buffering': 'no',
     },
-  });
+  })
 }
