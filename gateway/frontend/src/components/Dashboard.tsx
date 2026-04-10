@@ -4,6 +4,7 @@ import type { PLC } from '../api';
 import PLCCard from './PLCCard';
 import PLCModal from './PLCModal';
 import HallManagement from './HallManagement';
+import ConnectionStatus from './ConnectionStatus';
 import { usePLCWebsocket } from '../hooks/useWebsocket';
 import { Plus, LayoutDashboard, Cpu, Factory } from 'lucide-react';
 
@@ -35,7 +36,7 @@ const Dashboard: React.FC = () => {
     setPlcs(prev => prev.map(p => p.id === updatedPLC.id ? updatedPLC : p));
   }, []);
 
-  usePLCWebsocket(handlePLCUpdate);
+  const { status: wsStatus, lastEventAt } = usePLCWebsocket(handlePLCUpdate);
 
   const handleDelete = async (id: string) => {
     if (window.confirm('Czy na pewno chcesz usunąć ten sterownik?')) {
@@ -68,29 +69,32 @@ const Dashboard: React.FC = () => {
   return (
     <div className="py-4">
       {/* Tab Navigation */}
-      <div className="flex gap-4 mb-8 border-b border-gray-200">
-        <button 
+      <div className="flex gap-4 mb-8 border-b border-gray-200 items-center">
+        <button
           onClick={() => setActiveTab('plcs')}
           className={`pb-4 px-2 flex items-center gap-2 font-bold text-sm transition-all ${
-            activeTab === 'plcs' 
-              ? 'border-b-2 border-blue-600 text-blue-600' 
+            activeTab === 'plcs'
+              ? 'border-b-2 border-blue-600 text-blue-600'
               : 'text-gray-400 hover:text-gray-600'
           }`}
         >
           <Cpu size={18} />
           Sterowniki PLC
         </button>
-        <button 
+        <button
           onClick={() => setActiveTab('halls')}
           className={`pb-4 px-2 flex items-center gap-2 font-bold text-sm transition-all ${
-            activeTab === 'halls' 
-              ? 'border-b-2 border-blue-600 text-blue-600' 
+            activeTab === 'halls'
+              ? 'border-b-2 border-blue-600 text-blue-600'
               : 'text-gray-400 hover:text-gray-600'
           }`}
         >
           <Factory size={18} />
           Hale Produkcyjne
         </button>
+        <div className="ml-auto pb-3">
+          <ConnectionStatus status={wsStatus} lastEventAt={lastEventAt} />
+        </div>
       </div>
 
       {activeTab === 'plcs' ? (
