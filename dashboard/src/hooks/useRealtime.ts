@@ -13,6 +13,10 @@ interface UseRealtimeResult {
 const DEBOUNCE_MS = 500
 const INITIAL_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 30000
+// Fallback polling: safety net na wypadek, gdyby SSE wyglądało na żywe,
+// ale w rzeczywistości nie dostarczało eventów (np. zgubione broadcasty,
+// problemy po stronie EventEmitter). unstable_cache i tak buforuje zapytania.
+const FALLBACK_POLL_MS = 60000
 
 /**
  * Subskrybuje strumień SSE z /api/events.
@@ -31,6 +35,7 @@ export function useRealtimeUpdates(): UseRealtimeResult {
   const esRef = useRef<EventSource | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const backoffRef = useRef(INITIAL_BACKOFF_MS)
   const isMountedRef = useRef(true)
 
@@ -44,6 +49,13 @@ export function useRealtimeUpdates(): UseRealtimeResult {
 
   useEffect(() => {
     isMountedRef.current = true
+
+    // Fallback polling — niezależne od stanu SSE. Działa jako safety net
+    // gdyby kanał był "żywy" (OPEN) ale nie dostarczał eventów.
+    fallbackPollRef.current = setInterval(() => {
+      if (!isMountedRef.current) return
+      router.refresh()
+    }, FALLBACK_POLL_MS)
 
     const connect = () => {
       if (!isMountedRef.current) return
@@ -104,12 +116,13 @@ export function useRealtimeUpdates(): UseRealtimeResult {
       isMountedRef.current = false
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      if (fallbackPollRef.current) clearInterval(fallbackPollRef.current)
       if (esRef.current) {
         esRef.current.close()
         esRef.current = null
       }
     }
-  }, [scheduleRefresh])
+  }, [scheduleRefresh, router])
 
   return { status, lastEventAt }
 }

@@ -25,13 +25,22 @@ interface UseWsResult {
  * - Stabilny uchwyt onUpdate przez ref: zmiana callbacka nie
  *   wyrzuca całego połączenia.
  * - Ekspozycja stanu dla wskaźnika w UI.
+ * - onReconnect jest wywoływany po każdym udanym (re)connect — consumer
+ *   może zrobić pełne reconciliowanie stanu (np. refetch listy PLC),
+ *   żeby nadrobić ewentualne zdarzenia z okna gdy WS był rozłączony.
  */
-export const usePLCWebsocket = (onUpdate: (data: PLC) => void): UseWsResult => {
+export const usePLCWebsocket = (
+  onUpdate: (data: PLC) => void,
+  onReconnect?: () => void,
+): UseWsResult => {
   const [status, setStatus] = useState<WsStatus>('connecting');
   const [lastEventAt, setLastEventAt] = useState<Date | null>(null);
 
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
+
+  const onReconnectRef = useRef(onReconnect);
+  onReconnectRef.current = onReconnect;
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -62,6 +71,13 @@ export const usePLCWebsocket = (onUpdate: (data: PLC) => void): UseWsResult => {
         if (!mounted) { ws?.close(); return; }
         backoff = INITIAL_BACKOFF_MS;
         setStatus('connected');
+
+        // Reconciliacja po (re)connect — consumer odświeża pełny stan.
+        try {
+          onReconnectRef.current?.();
+        } catch (e) {
+          console.error('onReconnect handler failed:', e);
+        }
 
         heartbeatTimer = setInterval(() => {
           if (ws && ws.readyState === WebSocket.OPEN) {

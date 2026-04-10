@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api';
 import type { PLC } from '../api';
 import PLCCard from './PLCCard';
@@ -8,6 +8,8 @@ import ConnectionStatus from './ConnectionStatus';
 import { usePLCWebsocket } from '../hooks/useWebsocket';
 import { Plus, LayoutDashboard, Cpu, Factory } from 'lucide-react';
 
+const FALLBACK_POLL_MS = 60000;
+
 const Dashboard: React.FC = () => {
   const [plcs, setPlcs] = useState<PLC[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,7 +18,7 @@ const Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'plcs' | 'halls'>('plcs');
 
   // Pobieranie początkowych danych
-  const fetchPlcs = async () => {
+  const fetchPlcs = useCallback(async () => {
     try {
       const response = await api.get('/plcs');
       setPlcs(response.data);
@@ -25,18 +27,34 @@ const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const fetchPlcsRef = useRef(fetchPlcs);
+  fetchPlcsRef.current = fetchPlcs;
 
   useEffect(() => {
     fetchPlcs();
-  }, []);
+  }, [fetchPlcs]);
 
   // Callback do aktualizacji stanu przez WebSocket
   const handlePLCUpdate = useCallback((updatedPLC: PLC) => {
     setPlcs(prev => prev.map(p => p.id === updatedPLC.id ? updatedPLC : p));
   }, []);
 
-  const { status: wsStatus, lastEventAt } = usePLCWebsocket(handlePLCUpdate);
+  // Reconciliacja: po każdym (re)connect pobieramy świeży snapshot z API.
+  const handleReconnect = useCallback(() => {
+    fetchPlcsRef.current();
+  }, []);
+
+  const { status: wsStatus, lastEventAt } = usePLCWebsocket(handlePLCUpdate, handleReconnect);
+
+  // Fallback polling — safety net, gdyby WS był "żywy" ale nie dostarczał eventów.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchPlcsRef.current();
+    }, FALLBACK_POLL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleDelete = async (id: string) => {
     if (window.confirm('Czy na pewno chcesz usunąć ten sterownik?')) {
