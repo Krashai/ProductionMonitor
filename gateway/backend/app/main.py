@@ -3,7 +3,7 @@ import os
 import time
 import requests
 from collections import defaultdict, deque
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +35,18 @@ _workers_lock = asyncio.Lock()
 # Maksymalny czas oczekiwania na zakończenie wątku PLCWorker po stop().
 # Po tym czasie wątek jest porzucany — daemon=True więc nie blokuje shutdownu procesu.
 _WORKER_JOIN_TIMEOUT = 10.0
+
+
+async def _stop_and_join_worker(worker: PLCWorker) -> None:
+    """
+    Sygnalizuje workerowi stop i czeka na faktyczne wyjście z pętli.
+    `threading.Thread.join()` jest blokujące, więc odbywa się w threadpoolu —
+    bez tego pojedynczy live request (PUT/DELETE /plcs) mógłby zamrozić
+    cały event loop FastAPI na maks _WORKER_JOIN_TIMEOUT sekund.
+    """
+    worker.stop()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, worker.join, _WORKER_JOIN_TIMEOUT)
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     """Weryfikuje token JWT dla chronionych tras."""
@@ -150,14 +162,31 @@ app.add_middleware(
 # what an online brute-force needs to be useful against bcrypt-hashed passwords.
 _LOGIN_WINDOW_SECONDS = 5 * 60
 _LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_SWEEP_EVERY = 100
 _login_attempts: Dict[str, Deque[float]] = defaultdict(deque)
 _login_attempts_lock = asyncio.Lock()
+_login_sweep_counter = 0
 
 
 async def _check_login_rate_limit(client_ip: str) -> None:
     now = time.monotonic()
     cutoff = now - _LOGIN_WINDOW_SECONDS
     async with _login_attempts_lock:
+        # Okresowe sprzątanie: co _LOGIN_SWEEP_EVERY wywołań przeszukujemy
+        # cały słownik i kasujemy buckety, których wszystkie timestampy są
+        # już poza oknem. Bez tego defaultdict rósłby liniowo z liczbą
+        # unikalnych IP, które kiedykolwiek dotknęły /login.
+        global _login_sweep_counter
+        _login_sweep_counter += 1
+        if _login_sweep_counter >= _LOGIN_SWEEP_EVERY:
+            _login_sweep_counter = 0
+            stale = [
+                ip for ip, b in _login_attempts.items()
+                if not b or b[-1] < cutoff
+            ]
+            for ip in stale:
+                del _login_attempts[ip]
+
         bucket = _login_attempts[client_ip]
         while bucket and bucket[0] < cutoff:
             bucket.popleft()
@@ -248,8 +277,11 @@ async def delete_hall(hall_id: str, current_user: User = Depends(get_current_use
 
 @app.get("/plcs", response_model=List[PLCConfig])
 async def get_plcs(current_user: User = Depends(get_current_user)):
-    # Zwracamy aktualny stan workerów (który odzwierciedla bazę + stan online)
-    return [w.config for w in workers]
+    # Zwracamy aktualny stan workerów (który odzwierciedla bazę + stan online).
+    # Snapshot pod lockiem żeby nie było wyścigu z rebuildem listy
+    # w update_plc/delete_plc (`workers = [...]`).
+    async with _workers_lock:
+        return [w.config for w in workers]
 
 @app.post("/plcs", status_code=201)
 async def add_plc(config: PLCConfig, current_user: User = Depends(get_current_user)):
@@ -304,10 +336,10 @@ async def update_plc(plc_id: str, config: PLCConfig, current_user: User = Depend
         db_line.slot = config.slot
         db_line.type = config.type
         db_line.tags = [tag.model_dump() for tag in config.tags]
-        db_line.updatedAt = datetime.utcnow()
-        
+        db_line.updatedAt = datetime.now(timezone.utc)
+
         db.commit()
-        
+
         # Restart workera
         async with _workers_lock:
             target = next((w for w in workers if w.config.id == plc_id), None)
@@ -315,8 +347,7 @@ async def update_plc(plc_id: str, config: PLCConfig, current_user: User = Depend
                 workers = [w for w in workers if w.config.id != plc_id]
 
         if target:
-            target.stop()
-            target.join(timeout=_WORKER_JOIN_TIMEOUT)
+            await _stop_and_join_worker(target)
 
         loop = asyncio.get_running_loop()
         settings = load_settings()
@@ -349,8 +380,7 @@ async def delete_plc(plc_id: str, current_user: User = Depends(get_current_user)
                 workers = [w for w in workers if w.config.id != plc_id]
 
         if target:
-            target.stop()
-            target.join(timeout=_WORKER_JOIN_TIMEOUT)
+            await _stop_and_join_worker(target)
 
         # 2. Usuń historię i linię
         db.query(MachineStatusHistory).filter(MachineStatusHistory.lineId == db_line.id).delete()

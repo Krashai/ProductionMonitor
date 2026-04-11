@@ -9,13 +9,17 @@ from app.api.websocket import manager as ws_manager
 from app.db.session import SessionLocal
 from app.db.models import Line, MachineStatusHistory, ScrapEvent
 
-# Pomocnicza funkcja do powiadomień
+# Pomocnicza funkcja do powiadomień. Świadomie pochłaniamy sieciowe błędy
+# (dashboard może być niedostępny), ale NIE pochłaniamy KeyboardInterrupt
+# ani SystemExit — bare `except: pass` blokował by czysty shutdown procesu.
 def notify_dashboard(event_type: str, line_id: str):
     try:
-        requests.post("http://dashboard-app:3000/api/notify", 
-                      json={"type": event_type, "lineId": line_id}, 
-                      timeout=0.5)
-    except:
+        requests.post(
+            "http://dashboard-app:3000/api/notify",
+            json={"type": event_type, "lineId": line_id},
+            timeout=0.5,
+        )
+    except Exception:
         pass
 
 class PLCWorker(threading.Thread):
