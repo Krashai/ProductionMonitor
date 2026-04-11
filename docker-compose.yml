@@ -15,6 +15,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
       - TZ=Europe/Warsaw
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - PLC_GATEWAY_ENV=${PLC_GATEWAY_ENV:-development}
+      - PLC_GATEWAY_CORS_ORIGINS=${PLC_GATEWAY_CORS_ORIGINS:-http://localhost:3000,http://localhost:5173,http://dashboard-app:3000}
     depends_on:
       dashboard-db-init:
         condition: service_completed_successfully

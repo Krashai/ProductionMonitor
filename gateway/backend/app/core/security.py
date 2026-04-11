@@ -1,10 +1,31 @@
+import os
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-# W produkcji zmień SECRET_KEY na coś bezpiecznego i pobieraj z .env
-SECRET_KEY = "super-secret-key-for-plc-gateway"
+# SECRET_KEY MUST come from the environment. Hardcoding it (the previous
+# behaviour) meant every gateway deployment shared the same JWT signing key
+# and any leaked git history would compromise every install. We fail fast
+# in production. In dev (when the env var is missing) we generate a random
+# ephemeral key and warn loudly so the user knows their tokens won't survive
+# a restart.
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    if os.environ.get("PLC_GATEWAY_ENV", "").lower() == "production":
+        raise RuntimeError(
+            "JWT_SECRET_KEY is not set. Refusing to start in production with "
+            "an ephemeral signing key. Set JWT_SECRET_KEY in the environment."
+        )
+    SECRET_KEY = secrets.token_urlsafe(64)
+    print(
+        "WARNING: JWT_SECRET_KEY not set — generated an ephemeral key for this "
+        "process. Tokens will be invalidated on restart. Set JWT_SECRET_KEY in "
+        ".env for stable sessions.",
+        flush=True,
+    )
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24h
 

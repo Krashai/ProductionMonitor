@@ -1,12 +1,15 @@
 import asyncio
+import os
+import time
 import requests
+from collections import defaultdict, deque
 from datetime import timedelta, datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, status
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from typing import List
+from typing import Deque, Dict, List
 
 from app.core.config import load_settings, save_settings
 from app.core.models import PLCConfig, GlobalSettings, Token, LoginRequest, User, HallConfig, Tag
@@ -75,6 +78,17 @@ async def lifespan(app: FastAPI):
         settings.admin_password_hash = get_password_hash("admin")
         save_settings(settings)
         print("Ustawiono domyślne hasło: admin/admin", flush=True)
+        print(
+            "WARNING: Default admin password is in use. Change it via the UI "
+            "before exposing the gateway to any untrusted network.",
+            flush=True,
+        )
+    elif verify_password("admin", settings.admin_password_hash):
+        print(
+            "WARNING: Admin password is still the default 'admin'. Change it "
+            "via the UI before exposing the gateway to any untrusted network.",
+            flush=True,
+        )
     
     # Inicjalizacja workerów z bazy danych
     db = SessionLocal()
@@ -114,19 +128,67 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PLC Gateway S7", lifespan=lifespan)
 
+# CORS — whitelist explicitly via env, falling back to local dev origins.
+# Wildcard "*" allows any site on the operator's network to call the gateway,
+# which combined with the JWT-only auth was a real foot-gun.
+_default_origins = "http://localhost:3000,http://localhost:5173,http://dashboard-app:3000"
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get("PLC_GATEWAY_CORS_ORIGINS", _default_origins).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
+# In-memory rate limiter for /login. Sliding-window per client IP.
+# 5 attempts per 5 minutes is enough for a confused operator and well below
+# what an online brute-force needs to be useful against bcrypt-hashed passwords.
+_LOGIN_WINDOW_SECONDS = 5 * 60
+_LOGIN_MAX_ATTEMPTS = 5
+_login_attempts: Dict[str, Deque[float]] = defaultdict(deque)
+_login_attempts_lock = asyncio.Lock()
+
+
+async def _check_login_rate_limit(client_ip: str) -> None:
+    now = time.monotonic()
+    cutoff = now - _LOGIN_WINDOW_SECONDS
+    async with _login_attempts_lock:
+        bucket = _login_attempts[client_ip]
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= _LOGIN_MAX_ATTEMPTS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Zbyt wiele prób logowania. Spróbuj ponownie później.",
+            )
+        bucket.append(now)
+
+_ADMIN_USERNAME = os.environ.get("PLC_GATEWAY_ADMIN_USERNAME", "admin")
+
+
 @app.post("/login", response_model=Token)
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    await _check_login_rate_limit(client_ip)
+
     settings = load_settings()
+
+    # Both branches do bcrypt verification (or equivalent work) to keep the
+    # response time independent of whether the username exists, mitigating
+    # username enumeration. The previous implementation ignored the username
+    # field entirely.
+    if req.username != _ADMIN_USERNAME:
+        verify_password("dummy", settings.admin_password_hash or get_password_hash("dummy"))
+        raise HTTPException(status_code=401, detail="Błędne poświadczenia")
+
     if not verify_password(req.password, settings.admin_password_hash):
-        raise HTTPException(status_code=401, detail="Błędne hasło")
-    
+        raise HTTPException(status_code=401, detail="Błędne poświadczenia")
+
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": req.username}, expires_delta=access_token_expires
