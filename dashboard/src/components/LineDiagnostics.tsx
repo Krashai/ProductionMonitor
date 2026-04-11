@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils';
 import { addDowntimeComment, updateDowntimeComment } from '@/app/actions';
 import { X, Send, AlertCircle, MousePointer2, MessageSquareText, PencilLine, Plus, Timer, Gauge, Ban, History, Activity } from 'lucide-react';
 import { KPICard } from './KPICard';
+import { useRealtimeUpdates } from '@/hooks/useRealtime';
+import { ConnectionStatus } from './ConnectionStatus';
 
 type HistoryEntry = { time: string | Date; status: boolean; speed: number | string | null; _time: number };
 type Segment = { start: Date; end: Date; type: 'running' | 'downtime' };
@@ -50,6 +52,12 @@ interface Props {
 }
 
 export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialComments, from: fromStr, to: toStr }: Props) {
+  // Subskrypcja realtime: bez tego /line/[id] pokazywałby nieaktualne dane do
+  // czasu ręcznego F5. Hook robi router.refresh() z trailing debounce, więc
+  // Server Component page.tsx ponownie woła getLineDetails i strumieniuje
+  // świeże `initialHistory`/`initialPlans`/`initialComments` jako nowe props.
+  const { status: realtimeStatus, lastEventAt } = useRealtimeUpdates();
+
   const [mounted, setMounted] = useState(false);
   const from = useMemo(() => new Date(fromStr), [fromStr]);
   const to = useMemo(() => new Date(toStr), [toStr]);
@@ -268,6 +276,7 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
             <Activity size={14} />
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Praca Maszyny</span>
           </div>
+          <ConnectionStatus status={realtimeStatus} lastEventAt={lastEventAt} />
         </div>
         
         <div className="relative w-full bg-white pt-24 pb-10 px-10 overflow-x-visible min-h-[200px] select-none">
@@ -303,13 +312,17 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
                       </div>
                       <div className="absolute inset-0 flex bg-slate-50/50 rounded-xl border border-slate-100 shadow-[inset_0_2px_10px_rgb(0,0,0,0.02)] overflow-visible z-10" onMouseUp={onMouseUp}>
                         {plan.segments.map((seg: any, idx: number) => {
-                          const width = ((getPosition(seg.start) - getPosition(seg.start)) / planWidth) * 100; // placeholder, actually we need the segment width
                           const segWidth = ((getPosition(seg.end) - getPosition(seg.start)) / planWidth) * 100;
-                          
+
+                          // Standardowy test overlap przedziałów: [cStart, cEnd) ∩ [seg.start, seg.end) ≠ ∅.
+                          // Poprzedni warunek gubił komentarze zaczynające się PRZED segmentem
+                          // (np. awaria ciągnąca się przez kilka segmentów — widoczna tylko na pierwszym).
+                          const segStartMs = seg.start.getTime();
+                          const segEndMs = seg.end.getTime();
                           const matchingComments = initialComments.filter(c => {
-                            const cStart = new Date(c.startTime);
-                            const cEnd = new Date(c.endTime);
-                            return (cStart <= seg.start && cEnd >= seg.end) || (isWithinInterval(cStart, { start: seg.start, end: seg.end }));
+                            const cStart = new Date(c.startTime).getTime();
+                            const cEnd = new Date(c.endTime).getTime();
+                            return cStart < segEndMs && cEnd > segStartMs;
                           });
                           const isBeingSelected = selectionRange && isWithinInterval(seg.start, { start: selectionRange.start, end: selectionRange.end });
                           const shouldShowDot = matchingComments.some(c => {
@@ -320,7 +333,6 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
                           return (
                             <div key={idx}
                               onMouseDown={(e) => onMouseDown(e, seg.start, seg.type, matchingComments)}
-                              onMouseEnter={() => onMouseMove({ clientX: 0, clientY: 0 } as any, seg.start)}
                               className={cn(
                                 "h-full border-r border-white/5 last:border-0 relative transition-all group/seg",
                                 seg.type === 'running' ? "bg-emerald-500" : "bg-rose-500 cursor-crosshair hover:brightness-110 shadow-inner",
