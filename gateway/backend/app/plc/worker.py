@@ -80,55 +80,75 @@ class PLCWorker(threading.Thread):
 
     def run(self):
         """Główna pętla odczytu PLC."""
-        while self.running:
-            start_time = time.time()
-            has_db_line = self.find_line_id()
-            
-            is_connected = self.connect()
-            
-            if is_connected:
-                try:
-                    current_cycle_values = {}
-                    dbs = {}
-                    for tag in self.config.tags:
-                        if tag.db not in dbs: dbs[tag.db] = []
-                        dbs[tag.db].append(tag)
+        try:
+            while self.running:
+                start_time = time.time()
+                has_db_line = self.find_line_id()
 
-                    for db_num, tags in dbs.items():
-                        max_offset = max(t.offset for t in tags) + 4
-                        if any(t.type.upper() == "STRING" for t in tags):
-                            max_offset = max(max_offset, 256 + max(t.offset for t in tags if t.type.upper() == "STRING"))
+                is_connected = self.connect()
 
-                        raw_data = self.client.db_read(db_num, 0, max_offset)
+                if is_connected:
+                    try:
+                        current_cycle_values = {}
+                        dbs = {}
+                        for tag in self.config.tags:
+                            if tag.db not in dbs: dbs[tag.db] = []
+                            dbs[tag.db].append(tag)
 
-                        for tag in tags:
-                            bit_val = getattr(tag, 'bit', 0)
-                            val = decode_tag_value(raw_data, tag.offset, tag.type, bit_val)
-                            if val is not None:
-                                tag.value = val
-                                current_cycle_values[tag.name] = val
-                    
-                    if has_db_line:
-                        self.sync_cycle_to_db(current_cycle_values)
-                    
-                    self.config.online = True
-                except Exception as e:
-                    self.config.online = False
-                    self.client.disconnect()
-            
-            if has_db_line:
-                self.update_online_status()
-            
-            # Broadcast tylko gdy online lub przy zmianie statusu
-            if is_connected or self.config.online != self.last_db_online_status:
-                self.broadcast_update()
-            
-            elapsed = time.time() - start_time
-            
-            # Jeśli brak połączenia, czekaj dłużej (5s zamiast 1s)
-            dynamic_poll = self.poll_rate if is_connected else 5.0
-            sleep_time = max(0.1, dynamic_poll - elapsed)
-            time.sleep(sleep_time)
+                        for db_num, tags in dbs.items():
+                            max_offset = max(t.offset for t in tags) + 4
+                            if any(t.type.upper() == "STRING" for t in tags):
+                                max_offset = max(max_offset, 256 + max(t.offset for t in tags if t.type.upper() == "STRING"))
+
+                            raw_data = self.client.db_read(db_num, 0, max_offset)
+
+                            for tag in tags:
+                                bit_val = getattr(tag, 'bit', 0)
+                                val = decode_tag_value(raw_data, tag.offset, tag.type, bit_val)
+                                if val is not None:
+                                    tag.value = val
+                                    current_cycle_values[tag.name] = val
+
+                        if has_db_line:
+                            self.sync_cycle_to_db(current_cycle_values)
+
+                        self.config.online = True
+                    except Exception:
+                        self.config.online = False
+                        # Disconnect dozwolony tutaj — jesteśmy wewnątrz wątku,
+                        # który jako jedyny dotyka self.client. Zewnętrzny stop()
+                        # NIE robi już disconnect (snap7 nie jest thread-safe).
+                        self._safe_disconnect()
+
+                if has_db_line:
+                    self.update_online_status()
+
+                # Broadcast tylko gdy online lub przy zmianie statusu
+                if is_connected or self.config.online != self.last_db_online_status:
+                    self.broadcast_update()
+
+                elapsed = time.time() - start_time
+
+                # Jeśli brak połączenia, czekaj dłużej (5s zamiast 1s)
+                dynamic_poll = self.poll_rate if is_connected else 5.0
+                sleep_time = max(0.1, dynamic_poll - elapsed)
+                # Sleep w pętli krótkich kroków, żeby stop() reagował szybko
+                # (max 200 ms latencji shutdownu zamiast pełnego cyklu).
+                slept = 0.0
+                step = 0.2
+                while slept < sleep_time and self.running:
+                    time.sleep(min(step, sleep_time - slept))
+                    slept += step
+        finally:
+            # Cleanup z TEGO samego wątku, który operuje na clientcie.
+            self._safe_disconnect()
+
+    def _safe_disconnect(self):
+        try:
+            if self.client.get_connected():
+                self.client.disconnect()
+        except Exception:
+            pass
 
     def sync_cycle_to_db(self, current_cycle):
         """Atomowe zapisywanie stanu z całego cyklu odczytu."""
@@ -206,6 +226,13 @@ class PLCWorker(threading.Thread):
         asyncio.run_coroutine_threadsafe(ws_manager.broadcast(data), self.loop)
 
     def stop(self):
+        """
+        Sygnalizuje pętli wyjście. NIE woła disconnect() — snap7.Client nie jest
+        thread-safe i operacje TCP z obcego wątku w trakcie aktywnego db_read()
+        powodowały segfault. Disconnect następuje w `run()` w bloku finally,
+        z tego samego wątku, który operuje na clientcie.
+
+        Wywołujący powinien po stop() wywołać `worker.join(timeout=...)` żeby
+        poczekać aż wątek faktycznie wyjdzie z pętli.
+        """
         self.running = False
-        if self.client.get_connected():
-            self.client.disconnect()

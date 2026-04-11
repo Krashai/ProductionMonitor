@@ -26,6 +26,12 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Globalny stan
 workers: List[PLCWorker] = []
+# Lock chroniący mutacje listy `workers` przed wyścigiem między równolegle
+# obsługiwanymi requestami (FastAPI obsługuje wiele coroutyn jednocześnie).
+_workers_lock = asyncio.Lock()
+# Maksymalny czas oczekiwania na zakończenie wątku PLCWorker po stop().
+# Po tym czasie wątek jest porzucany — daemon=True więc nie blokuje shutdownu procesu.
+_WORKER_JOIN_TIMEOUT = 10.0
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     """Weryfikuje token JWT dla chronionych tras."""
@@ -92,10 +98,16 @@ async def lifespan(app: FastAPI):
         db.close()
 
     yield # Running...
-    
-    # SHUTDOWN
-    for worker in workers:
+
+    # SHUTDOWN — sygnalizujemy stop wszystkim, potem czekamy na join każdego.
+    # Bez join() proces FastAPI mógłby zakończyć się w trakcie aktywnego
+    # snap7.db_read() i wywołać segfault z nieczyszczonego socketu.
+    async with _workers_lock:
+        snapshot = list(workers)
+    for worker in snapshot:
         worker.stop()
+    for worker in snapshot:
+        worker.join(timeout=_WORKER_JOIN_TIMEOUT)
 
 app = FastAPI(title="PLC Gateway S7", lifespan=lifespan)
 
@@ -200,8 +212,9 @@ async def add_plc(config: PLCConfig, current_user: User = Depends(get_current_us
         settings = load_settings()
         worker = PLCWorker(config, loop, settings.poll_rate)
         worker.start()
-        workers.append(worker)
-        
+        async with _workers_lock:
+            workers.append(worker)
+
         notify_dashboard()
         return {"message": "Dodano sterownik"}
     except Exception as e:
@@ -231,17 +244,22 @@ async def update_plc(plc_id: str, config: PLCConfig, current_user: User = Depend
         db.commit()
         
         # Restart workera
-        target = next((w for w in workers if w.config.id == plc_id), None)
+        async with _workers_lock:
+            target = next((w for w in workers if w.config.id == plc_id), None)
+            if target:
+                workers = [w for w in workers if w.config.id != plc_id]
+
         if target:
             target.stop()
-            workers = [w for w in workers if w.config.id != plc_id]
-        
+            target.join(timeout=_WORKER_JOIN_TIMEOUT)
+
         loop = asyncio.get_event_loop()
         settings = load_settings()
         new_worker = PLCWorker(config, loop, settings.poll_rate)
         new_worker.start()
-        workers.append(new_worker)
-        
+        async with _workers_lock:
+            workers.append(new_worker)
+
         notify_dashboard()
         return {"message": "Zaktualizowano sterownik"}
     except Exception as e:
@@ -259,12 +277,16 @@ async def delete_plc(plc_id: str, current_user: User = Depends(get_current_user)
         if not db_line:
             raise HTTPException(status_code=404, detail="Nie znaleziono PLC")
             
-        # 1. Zatrzymaj workera
-        target = next((w for w in workers if w.config.id == plc_id), None)
+        # 1. Zatrzymaj workera (poza commitem DB — sygnał + join)
+        async with _workers_lock:
+            target = next((w for w in workers if w.config.id == plc_id), None)
+            if target:
+                workers = [w for w in workers if w.config.id != plc_id]
+
         if target:
             target.stop()
-            workers = [w for w in workers if w.config.id != plc_id]
-        
+            target.join(timeout=_WORKER_JOIN_TIMEOUT)
+
         # 2. Usuń historię i linię
         db.query(MachineStatusHistory).filter(MachineStatusHistory.lineId == db_line.id).delete()
         db.query(ScrapEvent).filter(ScrapEvent.lineId == db_line.id).delete()
@@ -286,4 +308,4 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)
