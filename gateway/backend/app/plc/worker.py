@@ -47,17 +47,36 @@ class PLCWorker(threading.Thread):
         return True
 
     def find_line_id(self):
-        """Pobiera wewnętrzne ID linii z bazy danych na podstawie plcId."""
+        """
+        Pobiera wewnętrzne ID linii z bazy danych na podstawie plcId
+        oraz seeduje cache `last_values` z ostatniego wpisu historycznego.
+        Bez seeda każdy restart workera generował fałszywy wpis "zmiany"
+        statusu w MachineStatusHistory na pierwszym cyklu, zafałszowując
+        kalkulacje OEE.
+        """
         if self.line_internal_id:
             return True
-        
+
         db = SessionLocal()
         try:
             line = db.query(Line).filter(Line.plcId == self.config.id).first()
-            if line:
-                self.line_internal_id = line.id
-                return True
-            return False
+            if not line:
+                return False
+
+            self.line_internal_id = line.id
+            self.last_db_online_status = line.isOnline
+
+            last_history = (
+                db.query(MachineStatusHistory)
+                .filter(MachineStatusHistory.lineId == line.id)
+                .order_by(MachineStatusHistory.time.desc())
+                .first()
+            )
+            if last_history is not None:
+                self.last_values['status_cache'] = bool(last_history.status)
+                self.last_values['speed_cache'] = float(last_history.speed or 0.0)
+
+            return True
         finally:
             db.close()
 
@@ -209,8 +228,6 @@ class PLCWorker(threading.Thread):
             if scrap_added:
                 db.commit()
                 notify_dashboard("LINE_UPDATE", str(self.line_internal_id))
-            else:
-                db.commit()
         except Exception as e:
             # print(f"DB CYCLE WRITE ERROR for {self.config.id}: {e}", flush=True)
             db.rollback()

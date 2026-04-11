@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from pathlib import Path
 from app.core.models import GlobalSettings
 
@@ -27,12 +28,32 @@ def load_settings() -> GlobalSettings:
     return settings
 
 def save_settings(settings: GlobalSettings):
-    """Zapisuje aktualne ustawienia do pliku JSON."""
+    """
+    Atomowy zapis ustawień: zapis do pliku tymczasowego w tym samym katalogu,
+    fsync, a następnie os.replace() — bez tego crash w trakcie write()
+    zostawiał uszkodzony settings.json (zer-bajtowy / niedopisany), co
+    blokowało start gateway przy następnym uruchomieniu.
+    """
     path = Path(CONFIG_PATH)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(settings.model_dump(), f, indent=4)
+
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".settings.", suffix=".json.tmp", dir=str(path.parent)
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(settings.model_dump(), f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
         print(f"Zapisano ustawienia do {path}")
     except PermissionError:
         print(f"BLAD KRYTYCZNY: Brak uprawnien do zapisu w {path}. Zmiany nie zostana utrwalone!")

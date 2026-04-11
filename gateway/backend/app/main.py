@@ -63,8 +63,11 @@ def notify_dashboard(event_type: str = "REVALIDATE", line_id: str = None):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # STARTUP
-    loop = asyncio.get_event_loop()
+    # STARTUP — używamy get_running_loop() bo lifespan wykonuje się
+    # już wewnątrz event loopu. get_event_loop() jest deprecated od Pythona
+    # 3.10 gdy nie ma jeszcze running loopu i nie powinno być używane wewnątrz
+    # async kontekstu — w przyszłych wersjach rzuci DeprecationWarning -> Error.
+    loop = asyncio.get_running_loop()
     settings = load_settings()
     
     # Inicjalizacja hasła admina (jeśli brak)
@@ -208,7 +211,7 @@ async def add_plc(config: PLCConfig, current_user: User = Depends(get_current_us
         db.commit()
         
         # Start workera
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         settings = load_settings()
         worker = PLCWorker(config, loop, settings.poll_rate)
         worker.start()
@@ -253,7 +256,7 @@ async def update_plc(plc_id: str, config: PLCConfig, current_user: User = Depend
             target.stop()
             target.join(timeout=_WORKER_JOIN_TIMEOUT)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         settings = load_settings()
         new_worker = PLCWorker(config, loop, settings.poll_rate)
         new_worker.start()
