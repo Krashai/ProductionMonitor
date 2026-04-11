@@ -63,17 +63,28 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
 
+_NOTIFY_TOKEN = os.environ.get("NOTIFY_TOKEN", "")
+_NOTIFY_URL = os.environ.get(
+    "DASHBOARD_NOTIFY_URL", "http://dashboard-app:3000/api/notify"
+)
+
+
 def notify_dashboard(event_type: str = "REVALIDATE", line_id: str = None):
     """Informuje Dashboard o zmianie stanu linii lub konfiguracji."""
     try:
-        # Próbujemy uderzyć w nowy endpoint notify
         payload = {"type": event_type}
         if line_id:
             payload["lineId"] = line_id
-            
-        requests.post("http://dashboard-app:3000/api/notify", json=payload, timeout=1)
-    except Exception as e:
-        # print(f"NOTIFICATION ERROR: {e}")
+
+        # Dashboard wymaga x-notify-token; bez tego zwraca 401 i revalidacja
+        # tagów Next.js (`halls-data`) nie wykonuje się — UI pokazuje dane
+        # sprzed ostatniego odświeżenia ISR.
+        headers = {}
+        if _NOTIFY_TOKEN:
+            headers["x-notify-token"] = _NOTIFY_TOKEN
+
+        requests.post(_NOTIFY_URL, json=payload, headers=headers, timeout=1)
+    except Exception:
         pass
 
 @asynccontextmanager

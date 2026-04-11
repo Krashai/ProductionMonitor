@@ -1,3 +1,4 @@
+import os
 import requests
 import time
 import threading
@@ -9,14 +10,24 @@ from app.api.websocket import manager as ws_manager
 from app.db.session import SessionLocal
 from app.db.models import Line, MachineStatusHistory, ScrapEvent
 
+_NOTIFY_TOKEN = os.environ.get("NOTIFY_TOKEN", "")
+_NOTIFY_URL = os.environ.get(
+    "DASHBOARD_NOTIFY_URL", "http://dashboard-app:3000/api/notify"
+)
+
+
 # Pomocnicza funkcja do powiadomień. Świadomie pochłaniamy sieciowe błędy
 # (dashboard może być niedostępny), ale NIE pochłaniamy KeyboardInterrupt
 # ani SystemExit — bare `except: pass` blokował by czysty shutdown procesu.
 def notify_dashboard(event_type: str, line_id: str):
     try:
+        headers = {}
+        if _NOTIFY_TOKEN:
+            headers["x-notify-token"] = _NOTIFY_TOKEN
         requests.post(
-            "http://dashboard-app:3000/api/notify",
+            _NOTIFY_URL,
             json={"type": event_type, "lineId": line_id},
+            headers=headers,
             timeout=0.5,
         )
     except Exception:
