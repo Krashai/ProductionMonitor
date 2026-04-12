@@ -3,6 +3,12 @@
 import { prisma } from '@/lib/prisma';
 import { revalidatePath, unstable_cache } from 'next/cache';
 import { format } from 'date-fns';
+import {
+  computeLineReport,
+  aggregatePlannedLines,
+  buildHealthDistribution,
+  type LineComputed,
+} from '@/lib/reporting/oee';
 
 /**
  * Pobiera wszystkie hale wraz z liniami i ich aktualnym stanem
@@ -359,9 +365,89 @@ export async function updateDowntimeComment(id: string, comment: string) {
 }
 
 /**
+ * Shape returned by {@link getReportingData}. When the query fails,
+ * `factorySummary` is `null` and `halls` is `[]` so the page can render
+ * a helpful empty state instead of crashing on destructured fields.
+ *
+ * `avgOee`, `avgAvailability`, and `prevAvgOee` are `null` when the
+ * scope contains zero lines with production plans — averaging "no
+ * plan" into the factory KPI would be misleading.
+ */
+export type ReportingLineStats = {
+  scrapCount: number;
+  workingTimeMs: number;
+  plannedTimeMs: number;
+  availability: number | null;
+  oee: number | null;
+  hasPlan: boolean;
+  isUnplanned: boolean;
+};
+
+export type ReportingLine = {
+  id: string;
+  name: string;
+  stats: ReportingLineStats;
+  prevStats: ReportingLineStats;
+  incidents: Array<{
+    startTime: Date;
+    endTime: Date;
+    durationMs: number;
+    comment: string | null;
+  }>;
+};
+
+export type ReportingHall = {
+  id: string;
+  name: string;
+  stats: {
+    avgOee: number | null;
+    avgAvailability: number | null;
+    totalScrap: number;
+    integrityScore: number;
+    plannedLineCount: number;
+  };
+  prevStats: {
+    avgOee: number | null;
+    totalScrap: number;
+  };
+  pareto: Array<{ name: string; downtimeMs: number }>;
+  topScrapLine: { name: string; count: number } | null;
+  lines: ReportingLine[];
+};
+
+export type ReportingFactorySummary = {
+  avgOee: number | null;
+  prevAvgOee: number | null;
+  totalScrap: number;
+  healthDistribution: {
+    green: number;
+    yellow: number;
+    red: number;
+    total: number;
+  };
+};
+
+export type ReportingData = {
+  factorySummary: ReportingFactorySummary | null;
+  halls: ReportingHall[];
+};
+
+function toLineStats(computed: LineComputed): ReportingLineStats {
+  return {
+    scrapCount: computed.scrapCount,
+    workingTimeMs: computed.workingTimeMs,
+    plannedTimeMs: computed.plannedTimeMs,
+    availability: computed.availability,
+    oee: computed.oee,
+    hasPlan: computed.hasPlan,
+    isUnplanned: !computed.hasPlan,
+  };
+}
+
+/**
  * Pobiera dane raportowe dla wszystkich hal w podanym zakresie czasu
  */
-export async function getReportingData(from: Date, to: Date) {
+export async function getReportingData(from: Date, to: Date): Promise<ReportingData> {
   try {
     const duration = to.getTime() - from.getTime();
     const prevFrom = new Date(from.getTime() - duration);
@@ -383,54 +469,62 @@ export async function getReportingData(from: Date, to: Date) {
       }
     });
 
-    const reportData = await Promise.all(halls.map(async (hall) => {
-      const lineReports = await Promise.all(hall.lines.map(async (line) => {
-        // 1. Statystyki aktualne
-        const stats = await getLineStats(line.id, from, to);
-        // 2. Statystyki poprzednie (do porównania)
-        const prevStats = await getLineStats(line.id, prevFrom, prevTo);
-        // 3. Incydenty (przestoje > 10 min)
-        const incidents = await getLineIncidents(line.id, from, to);
+    const reportData: ReportingHall[] = await Promise.all(halls.map(async (hall) => {
+      // Pobieramy wszystkie statystyki linii w hali równolegle, potem
+      // osobno incydenty (raw samples to jedyne źródło różne od OEE).
+      type LineWithStats = {
+        id: string;
+        name: string;
+        current: LineComputed;
+        prev: LineComputed;
+        incidents: Array<{ startTime: Date; endTime: Date; durationMs: number }>;
+        comments: typeof hall.lines[number]['comments'];
+      };
 
-        return {
-          id: line.id,
-          name: line.name,
-          stats,
-          prevStats,
-          incidents: incidents.map(inc => ({
-            ...inc,
-            comment: line.comments.find(c => 
-              (c.startTime <= inc.endTime && c.endTime >= inc.startTime)
-            )?.comment || null
-          }))
-        };
+      const enriched: LineWithStats[] = await Promise.all(
+        hall.lines.map(async (line) => {
+          const [current, prev, incidents] = await Promise.all([
+            getLineStats(line.id, from, to),
+            getLineStats(line.id, prevFrom, prevTo),
+            getLineIncidents(line.id, from, to),
+          ]);
+          return {
+            id: line.id,
+            name: line.name,
+            current,
+            prev,
+            incidents,
+            comments: line.comments,
+          };
+        })
+      );
+
+      const lineReports = enriched.map(e => ({
+        id: e.id,
+        name: e.name,
+        stats: toLineStats(e.current),
+        prevStats: toLineStats(e.prev),
+        incidents: e.incidents.map(inc => ({
+          ...inc,
+          comment: e.comments.find(c =>
+            c.startTime <= inc.endTime && c.endTime >= inc.startTime
+          )?.comment || null,
+        })),
       }));
 
-      // Agregacja na poziomie hali (tylko dla linii, które miały plan lub pracowały)
-      const plannedLines = lineReports.filter(l => !l.stats.isUnplanned);
-      const prevPlannedLines = lineReports.filter(l => !l.prevStats.isUnplanned);
+      // Agregacja przy pomocy czystych funkcji z modułu reporting/oee.
+      // Oba aggregatory ignorują linie bez planu — to jest świadoma
+      // decyzja produktowa: linia bez planu nie jest "słaba", po prostu
+      // nie ma jak ocenić jej wydajności w danym oknie.
+      const currentComputed = enriched.map(e => e.current);
+      const prevComputed = enriched.map(e => e.prev);
+
+      const hallAgg = aggregatePlannedLines(currentComputed);
+      const prevHallAgg = aggregatePlannedLines(prevComputed);
 
       const totalIncidents = lineReports.reduce((acc, l) => acc + l.incidents.length, 0);
-      const commentedIncidents = lineReports.reduce((acc, l) => 
+      const commentedIncidents = lineReports.reduce((acc, l) =>
         acc + l.incidents.filter(i => i.comment).length, 0);
-
-      const hallStats = {
-        avgOee: plannedLines.length > 0 
-          ? plannedLines.reduce((acc, l) => acc + l.stats.oee, 0) / plannedLines.length 
-          : 0,
-        totalScrap: lineReports.reduce((acc, l) => acc + l.stats.scrapCount, 0),
-        avgAvailability: plannedLines.length > 0
-          ? plannedLines.reduce((acc, l) => acc + l.stats.availability, 0) / plannedLines.length
-          : 0,
-        integrityScore: totalIncidents > 0 ? (commentedIncidents / totalIncidents) * 100 : 100,
-      };
-
-      const prevHallStats = {
-        avgOee: prevPlannedLines.length > 0
-          ? prevPlannedLines.reduce((acc, l) => acc + l.prevStats.oee, 0) / prevPlannedLines.length
-          : 0,
-        totalScrap: lineReports.reduce((acc, l) => acc + l.prevStats.scrapCount, 0),
-      };
 
       // Pareto: TOP 3 linie o największym skumulowanym czasie przestoju
       const paretoLines = [...lineReports]
@@ -442,52 +536,81 @@ export async function getReportingData(from: Date, to: Date) {
         .slice(0, 3)
         .filter(l => l.downtimeMs > 0);
 
-      // Lider Odrzutów (Top Scrap Line)
-      const topScrapLine = [...lineReports]
-        .sort((a, b) => b.stats.scrapCount - a.stats.scrapCount)[0] || null;
+      // Lider Odrzutów — tylko linie, które w ogóle miały zlecenia
+      // w tym oknie. Inaczej linia bez planu i zerowym scrapem może
+      // wygrać tę kategorię remisem, co jest mylące.
+      const topScrapCandidate = [...lineReports]
+        .filter(l => l.stats.hasPlan)
+        .sort((a, b) => b.stats.scrapCount - a.stats.scrapCount)[0];
 
       return {
         id: hall.id,
         name: hall.name,
-        stats: hallStats,
-        prevStats: prevHallStats,
+        stats: {
+          avgOee: hallAgg.avgOee,
+          avgAvailability: hallAgg.avgAvailability,
+          totalScrap: hallAgg.totalScrap,
+          integrityScore: totalIncidents > 0 ? (commentedIncidents / totalIncidents) * 100 : 100,
+          plannedLineCount: hallAgg.plannedLineCount,
+        },
+        prevStats: {
+          avgOee: prevHallAgg.avgOee,
+          totalScrap: prevHallAgg.totalScrap,
+        },
         pareto: paretoLines,
-        topScrapLine: topScrapLine ? {
-          name: topScrapLine.name,
-          count: topScrapLine.stats.scrapCount
+        topScrapLine: topScrapCandidate ? {
+          name: topScrapCandidate.name,
+          count: topScrapCandidate.stats.scrapCount,
         } : null,
-        lines: lineReports
+        lines: lineReports,
       };
     }));
 
-    // AGREGACJA GLOBALNA (DLA CAŁEJ FABRYKI)
-    const allLines = reportData.flatMap(h => h.lines);
-    const allPlannedLines = allLines.filter(l => !l.stats.isUnplanned);
-    const allPrevPlannedLines = allLines.filter(l => !l.prevStats.isUnplanned);
+    // AGREGACJA GLOBALNA (DLA CAŁEJ FABRYKI) — rekonstruujemy
+    // LineComputed z tego, co zapisaliśmy na poziomie hali.
+    const allComputed: LineComputed[] = reportData
+      .flatMap(h => h.lines)
+      .map(l => ({
+        hasPlan: l.stats.hasPlan,
+        plannedTimeMs: l.stats.plannedTimeMs,
+        workingTimeMs: l.stats.workingTimeMs,
+        availability: l.stats.availability,
+        oee: l.stats.oee,
+        scrapCount: l.stats.scrapCount,
+      }));
+    const allPrevComputed: LineComputed[] = reportData
+      .flatMap(h => h.lines)
+      .map(l => ({
+        hasPlan: l.prevStats.hasPlan,
+        plannedTimeMs: l.prevStats.plannedTimeMs,
+        workingTimeMs: l.prevStats.workingTimeMs,
+        availability: l.prevStats.availability,
+        oee: l.prevStats.oee,
+        scrapCount: l.prevStats.scrapCount,
+      }));
 
-    const factorySummary = {
-      avgOee: allPlannedLines.length > 0
-        ? allPlannedLines.reduce((acc, l) => acc + l.stats.oee, 0) / allPlannedLines.length
-        : 0,
-      totalScrap: allLines.reduce((acc, l) => acc + l.stats.scrapCount, 0),
-      prevAvgOee: allPrevPlannedLines.length > 0
-        ? allPrevPlannedLines.reduce((acc, l) => acc + l.prevStats.oee, 0) / allPrevPlannedLines.length
-        : 0,
-      healthDistribution: {
-        green: allPlannedLines.filter(l => l.stats.oee > 85).length,
-        yellow: allPlannedLines.filter(l => l.stats.oee <= 85 && l.stats.oee >= 60).length,
-        red: allPlannedLines.filter(l => l.stats.oee < 60).length,
-        total: allPlannedLines.length
-      }
+    const factoryAgg = aggregatePlannedLines(allComputed);
+    const prevFactoryAgg = aggregatePlannedLines(allPrevComputed);
+    const healthDistribution = buildHealthDistribution(allComputed);
+
+    const factorySummary: ReportingFactorySummary = {
+      avgOee: factoryAgg.avgOee,
+      prevAvgOee: prevFactoryAgg.avgOee,
+      totalScrap: factoryAgg.totalScrap,
+      healthDistribution,
     };
 
+    // JSON round-trip serializes Date → string for the Client Component
+    // boundary. Prisma Date objects can't cross it otherwise.
     return JSON.parse(JSON.stringify({
       factorySummary,
-      halls: reportData
+      halls: reportData,
     }));
   } catch (error) {
     console.error('Error generating report:', error);
-    return [];
+    // Return a typed empty shape so the Client Component can render
+    // "no data" instead of crashing on `data.factorySummary.avgOee`.
+    return { factorySummary: null, halls: [] };
   }
 }
 
@@ -533,107 +656,82 @@ async function getHallHourlyActivity(hallId: string, from: Date, to: Date) {
 }
 
 /**
- * Pomocnicza funkcja do statystyk linii (ZOPTYMALIZOWANA SQL)
+ * Loads the raw data needed by {@link computeLineReport} and delegates
+ * the actual math to the pure module in `@/lib/reporting/oee`. Keeping
+ * the SQL here and the arithmetic there lets the calculation be unit
+ * tested without a database.
+ *
+ * Query plan per call: one `findMany` for plans, one `findFirst` for
+ * the prior status sample, one `findMany` for in-window history, one
+ * `count` for scrap — four round-trips, all run in parallel where
+ * possible. This replaces the previous N-plans raw-SQL loop.
  */
-async function getLineStats(lineId: string, from: Date, to: Date) {
-  // 1. Pobieramy plany produkcyjne w tym zakresie (przycięte do granic from/to i NOW)
+async function getLineStats(lineId: string, from: Date, to: Date): Promise<LineComputed> {
+  const now = new Date();
+  const upperBound = new Date(Math.min(to.getTime(), now.getTime()));
+
+  // Plans must load first — scrap clipping uses their bounds.
   const plans = await prisma.productionPlan.findMany({
     where: {
       lineId,
-      startTime: { lt: to },
+      startTime: { lt: upperBound },
       endTime: { gt: from },
-    }
+    },
+    select: { startTime: true, endTime: true },
   });
 
-  const now = new Date();
-  let totalPlannedTimeMs = 0;
-  
-  // Obliczamy całkowity zaplanowany czas (mianownik OEE)
-  plans.forEach(p => {
-    const start = Math.max(p.startTime.getTime(), from.getTime());
-    const end = Math.min(p.endTime.getTime(), to.getTime(), now.getTime());
-    if (end > start) {
-      totalPlannedTimeMs += (end - start);
-    }
-  });
-
-  // 2. Scrap count (tylko w trakcie planów)
-  let scrapCount = 0;
-  if (plans.length > 0) {
-    const scrapResult = await prisma.scrapEvent.count({
-      where: {
-        lineId,
-        OR: plans.map(p => ({
-          time: {
-            gte: new Date(Math.max(p.startTime.getTime(), from.getTime())),
-            lte: new Date(Math.min(p.endTime.getTime(), to.getTime(), now.getTime()))
-          }
-        }))
-      }
+  // No plan overlap → short-circuit via the pure module so we don't
+  // hit the DB for history or scrap we'd never use.
+  if (plans.length === 0) {
+    return computeLineReport({
+      from,
+      to,
+      now,
+      plans: [],
+      history: [],
+      priorStatus: false,
+      scrapCount: 0,
     });
-    scrapCount = scrapResult;
   }
 
-  // 3. Obliczanie Working Time przy użyciu SQL (Tylko w oknach planów)
-  let workingTimeMs = 0;
-  if (totalPlannedTimeMs > 0) {
-    // Dla każdego segmentu planu liczymy czas pracy
-    for (const p of plans) {
-      const pStart = new Date(Math.max(p.startTime.getTime(), from.getTime()));
-      const pEnd = new Date(Math.min(p.endTime.getTime(), to.getTime(), now.getTime()));
-      
-      if (pEnd <= pStart) continue;
+  // Clip plan ranges to the computable window for scrap filtering.
+  const clippedPlans = plans
+    .map(p => ({
+      start: new Date(Math.max(p.startTime.getTime(), from.getTime())),
+      end: new Date(Math.min(p.endTime.getTime(), upperBound.getTime())),
+    }))
+    .filter(p => p.end > p.start);
 
-      const result = await prisma.$queryRaw<any[]>`
-        WITH bounds AS (
-          SELECT ${pStart}::timestamptz as start_time, ${pEnd}::timestamptz as end_time
-        ),
-        initial_state AS (
-          SELECT status
-          FROM machine_status_history
-          WHERE "lineId" = ${lineId} AND "time" < (SELECT start_time FROM bounds)
-          ORDER BY "time" DESC
-          LIMIT 1
-        ),
-        timeline AS (
-          SELECT (SELECT start_time FROM bounds) as time, COALESCE((SELECT status FROM initial_state), false) as status
-          UNION ALL
-          SELECT "time", status
-          FROM machine_status_history
-          WHERE "lineId" = ${lineId} 
-            AND "time" >= (SELECT start_time FROM bounds) 
-            AND "time" <= (SELECT end_time FROM bounds)
-          UNION ALL
-          SELECT (SELECT end_time FROM bounds) as time, true as status
-        )
-        SELECT SUM(duration) as "workingTimeMs"
-        FROM (
-          SELECT
-            status,
-            EXTRACT(EPOCH FROM (LEAD(time) OVER (ORDER BY time) - time)) * 1000 as duration
-          FROM timeline
-        ) sub
-        WHERE status = true;
-      `;
-      workingTimeMs += Number(result[0]?.workingTimeMs || 0);
-    }
-  }
+  const [priorSample, history, scrapCount] = await Promise.all([
+    prisma.machineStatusHistory.findFirst({
+      where: { lineId, time: { lt: from } },
+      orderBy: { time: 'desc' },
+      select: { status: true },
+    }),
+    prisma.machineStatusHistory.findMany({
+      where: { lineId, time: { gte: from, lte: upperBound } },
+      orderBy: { time: 'asc' },
+      select: { time: true, status: true },
+    }),
+    clippedPlans.length > 0
+      ? prisma.scrapEvent.count({
+          where: {
+            lineId,
+            OR: clippedPlans.map(p => ({ time: { gte: p.start, lte: p.end } })),
+          },
+        })
+      : Promise.resolve(0),
+  ]);
 
-  const availability = totalPlannedTimeMs > 0 ? (workingTimeMs / totalPlannedTimeMs) * 100 : 0;
-  const oee = Math.min(100, availability); // Na razie uproszczone
-
-  // Linia nieplanowana to taka, która nie miała zlecenia I nie pracowała
-  const isUnplanned = totalPlannedTimeMs === 0 && workingTimeMs === 0;
-
-  return {
+  return computeLineReport({
+    from,
+    to,
+    now,
+    plans: plans.map(p => ({ startTime: p.startTime, endTime: p.endTime })),
+    history: history.map(h => ({ time: h.time, status: h.status })),
+    priorStatus: priorSample?.status ?? false,
     scrapCount,
-    workingTimeMs,
-    availability,
-    oee,
-    isUnplanned,
-    hasPlan: totalPlannedTimeMs > 0,
-    plannedTimeMs: totalPlannedTimeMs
-  };
+  });
 }
 
 /**
