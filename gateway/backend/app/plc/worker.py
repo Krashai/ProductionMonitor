@@ -141,7 +141,8 @@ class PLCWorker(threading.Thread):
                     new_status = str(current_cycle[name]).lower() in ['true', '1']
                     break
             
-            new_speed = current_cycle.get('Speed') or current_cycle.get('speed')
+            _speed_raw = current_cycle.get('Speed')
+            new_speed = _speed_raw if _speed_raw is not None else current_cycle.get('speed')
             if new_speed is not None:
                 new_speed = float(new_speed)
 

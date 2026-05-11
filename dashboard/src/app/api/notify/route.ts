@@ -1,4 +1,5 @@
 import { emitRealtimeEvent } from '@/lib/events';
+import { revalidateTag } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing event type' }, { status: 400 });
     }
 
-    // Emitujemy zdarzenie do wewnątrz serwera
+    revalidateTag('halls-data');
     emitRealtimeEvent({
       type,
       lineId,
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
  * Kompatybilność wsteczna dla starego mechanizmu revalidate
  */
 export async function GET(req: NextRequest) {
+  revalidateTag('halls-data');
   emitRealtimeEvent({ type: 'REVALIDATE', timestamp: new Date().toISOString() });
   return NextResponse.json({ message: 'Legacy revalidate triggered' });
 }
