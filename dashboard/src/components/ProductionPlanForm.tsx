@@ -80,8 +80,8 @@ export function ProductionPlanForm({ lines, allPlans, initialData, onSuccess }: 
     if (result.success) {
       setMessage({ type: 'success', text: isEdit ? 'Zaktualizowano.' : 'Dodano pomyślnie.' });
       if (onSuccess) setTimeout(onSuccess, 1000);
-    } else if (result.warning) {
-      setWarning(result.message || 'Kolizja w planie.');
+    } else if ('warning' in result && result.warning) {
+      setWarning(('message' in result && result.message) || 'Kolizja w planie.');
     } else {
       setMessage({ type: 'error', text: result.error || 'Błąd.' });
     }

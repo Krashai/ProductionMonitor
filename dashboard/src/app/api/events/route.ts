@@ -10,38 +10,44 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const encoder = new TextEncoder();
 
+  let onDataUpdate: (event: unknown) => void;
+  let heartbeat: ReturnType<typeof setInterval>;
+
   const stream = new ReadableStream({
     start(controller) {
-      // Funkcja wysyłająca wiadomość do klienta w formacie SSE
-      const sendEvent = (data: any) => {
+      const sendEvent = (data: unknown) => {
         try {
-          const message = `data: ${JSON.stringify(data)}\n\n`;
-          controller.enqueue(encoder.encode(message));
-        } catch (e) {
-          console.error('Error enqueuing message:', e);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          // stream already closed
         }
       };
 
-      // Subskrybujemy nasz wewnętrzny emiter zdarzeń
-      const onDataUpdate = (event: any) => {
-        sendEvent(event);
-      };
-
+      onDataUpdate = (event: unknown) => sendEvent(event);
       eventEmitter.on('data-update', onDataUpdate);
 
-      // Wysyłamy wiadomość powitalną (Keep-alive)
       sendEvent({ type: 'CONNECTED', timestamp: new Date().toISOString() });
 
-      // Obsługa zamknięcia połączenia przez przeglądarkę
+      // Heartbeat co 25s — SSE comment (`:`) resetuje proxy_read_timeout
+      // bez wyzwalania onmessage w przegladarce.
+      heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(': heartbeat\n\n'));
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 25_000);
+
       req.signal.addEventListener('abort', () => {
+        clearInterval(heartbeat);
         eventEmitter.off('data-update', onDataUpdate);
-        controller.close();
+        try { controller.close(); } catch { /* already closed */ }
       });
     },
     cancel() {
-      // Dodatkowe czyszczenie przy zamknięciu streamu
-      // eventEmitter.off('data-update', onDataUpdate); // onDataUpdate nie jest dostępny tutaj, obsłużone w start
-    }
+      clearInterval(heartbeat);
+      eventEmitter.off('data-update', onDataUpdate);
+    },
   });
 
   return new Response(stream, {
