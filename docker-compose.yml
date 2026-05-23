@@ -48,8 +48,10 @@ services:
       POSTGRES_DB: line_gantt
       TS_TUNE: "off"
       TZ: Europe/Warsaw
-    ports:
-      - "5432:5432"
+    # Brak host-port mappingu: aplikacja łączy się przez sieć wewnętrzną prod_net.
+    # Port 5432 na hoście zajmuje już inny kontener (energy_timescaledb).
+    expose:
+      - "5432"
     volumes:
       - dashboard_pgdata:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
@@ -96,6 +98,10 @@ services:
       - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
       - NODE_ENV=production
       - TZ=Europe/Warsaw
+      # Hasło i sekret sesji ładowane z .env (patrz .env.example).
+      # Brak wartości w .env → docker compose przerwie z czytelnym błędem.
+      - PLANNING_PASSWORD=${PLANNING_PASSWORD:?PLANNING_PASSWORD musi być ustawione w .env}
+      - PLANNING_SESSION_SECRET=${PLANNING_SESSION_SECRET:?PLANNING_SESSION_SECRET musi być ustawione w .env (openssl rand -hex 32)}
     networks:
       - prod_net
     restart: always
