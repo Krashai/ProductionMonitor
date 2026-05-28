@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useTransition, useCallback } from 'react';
-import { getReportingData } from '@/app/actions';
+import { getReportingData, type ReportingData, type ReportingHall, type ReportingLine, type ReportingFactorySummary } from '@/app/actions';
 import { format, subHours, subDays, startOfDay, endOfDay } from 'date-fns';
 import { pl } from 'date-fns/locale';
 import { 
@@ -27,71 +27,11 @@ import {
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-type Incident = {
-  startTime: string;
-  endTime: string;
-  durationMs: number;
-  comment: string | null;
-};
+type HallReport = ReportingHall;
+type LineReport = ReportingLine;
 
-type ParetoItem = {
-  name: string;
-  downtimeMs: number;
-};
-
-type LineReport = {
-  id: string;
-  name: string;
-  stats: {
-    scrapCount: number;
-    workingTimeMs: number;
-    availability: number;
-    oee: number;
-    isUnplanned: boolean;
-    hasPlan: boolean;
-  };
-  prevStats: {
-    scrapCount: number;
-    workingTimeMs: number;
-    availability: number;
-    oee: number;
-    isUnplanned: boolean;
-  };
-  incidents: Incident[];
-};
-
-type HallReport = {
-  id: string;
-  name: string;
-  stats: {
-    avgOee: number;
-    totalScrap: number;
-    avgAvailability: number;
-    integrityScore: number;
-  };
-  prevStats: {
-    avgOee: number;
-    totalScrap: number;
-  };
-  pareto: ParetoItem[];
-  topScrapLine: {
-    name: string;
-    count: number;
-  } | null;
-  lines: LineReport[];
-};
-
-type FactorySummary = {
-  avgOee: number;
-  totalScrap: number;
-  prevAvgOee: number;
-  healthDistribution: {
-    green: number;
-    yellow: number;
-    red: number;
-    total: number;
-  };
-};
+const fmtPct = (v: number | null, digits = 1) =>
+  v === null ? '—' : `${v.toFixed(digits)}%`;
 
 export const dynamic = 'force-dynamic';
 
@@ -104,7 +44,7 @@ const PRESETS = [
 
 export default function ReportingPage() {
   const [dateRange, setDateRange] = useState({ from: subDays(new Date(), 1), to: new Date() });
-  const [data, setData] = useState<{ factorySummary: FactorySummary, halls: HallReport[] } | null>(null);
+  const [data, setData] = useState<ReportingData | null>(null);
   const [isPending, startTransition] = useTransition();
   const [expandedHalls, setExpandedHalls] = useState<Record<string, boolean>>({});
   const [expandedLines, setExpandedLines] = useState<Record<string, boolean>>({});
@@ -183,8 +123,15 @@ export default function ReportingPage() {
           </span>
         </div>
 
-        {data && (
-          <>
+        {data?.factorySummary && (() => {
+          const fs = data.factorySummary;
+          const hd = fs.healthDistribution;
+          const hdTotal = hd.total;
+          const pct = (n: number) => (hdTotal > 0 ? (n / hdTotal) * 100 : 0);
+          const hasPrev = fs.avgOee !== null && fs.prevAvgOee !== null;
+          const diff = hasPrev ? fs.avgOee! - fs.prevAvgOee! : 0;
+          return (
+            <>
             {/* --- GLOBAL EXECUTIVE SUMMARY (VERSION SLIM) --- */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-12">
               {/* Lewa: Global KPIs */}
@@ -194,17 +141,23 @@ export default function ReportingPage() {
                   <div className="space-y-1">
                     <p className="text-[12px] text-blue-600 font-black uppercase tracking-widest">Globalny wskaźnik OEE</p>
                     <h3 className="text-6xl font-black text-slate-900 font-mono tracking-tighter leading-none group-hover:translate-x-1 transition-transform duration-500">
-                      {data.factorySummary.avgOee.toFixed(1)}%
+                      {fmtPct(fs.avgOee)}
                     </h3>
                   </div>
                   <div className="mt-4 flex items-center gap-3">
-                    <div className={cn(
-                      "flex items-center px-2 py-0.5 rounded-lg text-[11px] font-black",
-                      data.factorySummary.avgOee >= data.factorySummary.prevAvgOee ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"
-                    )}>
-                      {data.factorySummary.avgOee >= data.factorySummary.prevAvgOee ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                      <span className="ml-1">{Math.abs(data.factorySummary.avgOee - data.factorySummary.prevAvgOee).toFixed(1)}%</span>
-                    </div>
+                    {hasPrev ? (
+                      <div className={cn(
+                        "flex items-center px-2 py-0.5 rounded-lg text-[11px] font-black",
+                        diff >= 0 ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"
+                      )}>
+                        {diff >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                        <span className="ml-1">{Math.abs(diff).toFixed(1)}%</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center px-2 py-0.5 rounded-lg text-[11px] font-black text-slate-400 bg-slate-50">
+                        <span>—</span>
+                      </div>
+                    )}
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">vs poprz. okres</span>
                   </div>
                 </div>
@@ -214,7 +167,7 @@ export default function ReportingPage() {
                   <div className="space-y-1">
                     <p className="text-[12px] text-rose-600 font-black uppercase tracking-widest">Łączna liczba odrzutów</p>
                     <h3 className="text-6xl font-black text-slate-900 font-mono tracking-tighter leading-none group-hover:translate-x-1 transition-transform duration-500">
-                      {data.factorySummary.totalScrap}
+                      {fs.totalScrap}
                     </h3>
                   </div>
                   <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-4">Suma sztuk wadliwych</p>
@@ -227,41 +180,51 @@ export default function ReportingPage() {
                   <p className="text-[12px] text-emerald-600 font-black uppercase tracking-widest leading-none">Kondycja parku maszynowego</p>
                   <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Rozkład efektywności</h3>
                 </div>
-                
+
                 <div className="space-y-6 mt-4">
                   <div className="w-full h-5 bg-slate-50 rounded-full overflow-hidden flex shadow-inner border border-slate-100/50">
-                    <div 
-                      className="h-full bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all duration-1000" 
-                      style={{ width: `${(data.factorySummary.healthDistribution.green / data.factorySummary.healthDistribution.total) * 100}%` }} 
+                    <div
+                      className="h-full bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.4)] transition-all duration-1000"
+                      style={{ width: `${pct(hd.green)}%` }}
                     />
-                    <div 
-                      className="h-full bg-amber-400 transition-all duration-1000" 
-                      style={{ width: `${(data.factorySummary.healthDistribution.yellow / data.factorySummary.healthDistribution.total) * 100}%` }} 
+                    <div
+                      className="h-full bg-amber-400 transition-all duration-1000"
+                      style={{ width: `${pct(hd.yellow)}%` }}
                     />
-                    <div 
-                      className="h-full bg-rose-500 transition-all duration-1000" 
-                      style={{ width: `${(data.factorySummary.healthDistribution.red / data.factorySummary.healthDistribution.total) * 100}%` }} 
+                    <div
+                      className="h-full bg-rose-500 transition-all duration-1000"
+                      style={{ width: `${pct(hd.red)}%` }}
                     />
                   </div>
 
                   <div className="flex flex-row justify-between items-center px-1">
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
-                      <span className="text-[12px] font-black text-slate-900 uppercase tracking-tight">&gt; 85% ({data.factorySummary.healthDistribution.green})</span>
+                      <span className="text-[12px] font-black text-slate-900 uppercase tracking-tight">&gt; 85% ({hd.green})</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-amber-400 rounded-full" />
-                      <span className="text-[12px] font-black text-slate-900 uppercase tracking-tight">60-85% ({data.factorySummary.healthDistribution.yellow})</span>
+                      <span className="text-[12px] font-black text-slate-900 uppercase tracking-tight">60-85% ({hd.yellow})</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-rose-500 rounded-full" />
-                      <span className="text-[12px] font-black text-slate-900 uppercase tracking-tight">&lt; 60% ({data.factorySummary.healthDistribution.red})</span>
+                      <span className="text-[12px] font-black text-slate-900 uppercase tracking-tight">&lt; 60% ({hd.red})</span>
                     </div>
                   </div>
+                  {hdTotal === 0 && (
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">
+                      Brak planów w wybranym oknie
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
+            </>
+          );
+        })()}
 
+        {data && (
+          <>
             {/* --- HALL REPORTS --- */}
             <div className="space-y-8 mt-12 pt-12 border-t border-slate-100">
               <div className="flex items-center gap-4 mb-4 px-2">
@@ -292,14 +255,18 @@ export default function ReportingPage() {
                             <div className="space-y-1">
                               <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest leading-none">Średni OEE</p>
                               <div className="flex items-center gap-3">
-                                <span className="text-4xl font-black text-slate-900 font-mono tracking-tighter leading-none">{hall.stats.avgOee.toFixed(1)}%</span>
-                                <div className={cn(
-                                  "flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black h-fit",
-                                  hall.stats.avgOee >= hall.prevStats.avgOee ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"
-                                )}>
-                                  {hall.stats.avgOee >= hall.prevStats.avgOee ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                                  <span className="ml-1">{Math.abs(hall.stats.avgOee - hall.prevStats.avgOee).toFixed(1)}%</span>
-                                </div>
+                                <span className="text-4xl font-black text-slate-900 font-mono tracking-tighter leading-none">{fmtPct(hall.stats.avgOee)}</span>
+                                {hall.stats.avgOee !== null && hall.prevStats.avgOee !== null ? (
+                                  <div className={cn(
+                                    "flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black h-fit",
+                                    hall.stats.avgOee >= hall.prevStats.avgOee ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"
+                                  )}>
+                                    {hall.stats.avgOee >= hall.prevStats.avgOee ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                    <span className="ml-1">{Math.abs(hall.stats.avgOee - hall.prevStats.avgOee).toFixed(1)}%</span>
+                                  </div>
+                                ) : hall.stats.avgOee === null ? (
+                                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Brak planu</span>
+                                ) : null}
                               </div>
                             </div>
 
@@ -391,24 +358,33 @@ export default function ReportingPage() {
                           <div className="space-y-4 pt-8 border-t border-slate-100">
                             <div className="flex items-center justify-between px-2 mb-2">
                               <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 px-2 border-l-2 border-blue-500 ml-1">Zestawienie Maszyn</h3>
-                              <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{hall.lines.filter(l => !l.stats.isUnplanned).length} Aktywnych jednostek</span>
+                              <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{hall.stats.plannedLineCount}/{hall.lines.length} Aktywnych jednostek</span>
                             </div>
                             <div className="grid grid-cols-1 gap-3">
-                              {hall.lines.filter(l => !l.stats.isUnplanned).map((line) => (
-                                <div key={line.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-slate-200 transition-all duration-300 group/line">
-                                  <div 
+                              {hall.lines.map((line) => {
+                                const oee = line.stats.oee;
+                                const barColor = !line.stats.hasPlan
+                                  ? 'bg-slate-200'
+                                  : oee !== null && oee > 85
+                                  ? 'bg-emerald-500'
+                                  : oee !== null && oee > 60
+                                  ? 'bg-amber-500'
+                                  : 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]';
+                                return (
+                                <div key={line.id} className={cn(
+                                  "bg-white rounded-2xl border shadow-sm hover:border-slate-200 transition-all duration-300 group/line",
+                                  line.stats.hasPlan ? "border-slate-100" : "border-slate-100 opacity-80"
+                                )}>
+                                  <div
                                     onClick={() => toggleLine(line.id)}
                                     className="p-5 flex items-center justify-between cursor-pointer"
                                   >
                                     <div className="flex items-center gap-10">
-                                      <div className={cn(
-                                        "w-1.5 h-10 rounded-full shrink-0 transition-all duration-700",
-                                        line.stats.oee > 85 ? "bg-emerald-500" : line.stats.oee > 60 ? "bg-amber-500" : "bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]"
-                                      )} />
-                                      <div className="w-32 shrink-0">
+                                      <div className={cn("w-1.5 h-10 rounded-full shrink-0 transition-all duration-700", barColor)} />
+                                      <div className="w-32 shrink-0 flex items-center gap-2">
                                         <h3 className="text-lg font-black text-slate-900 tracking-tight uppercase group-hover/line:text-blue-600 transition-colors leading-none">{line.name}</h3>
                                       </div>
-                                      
+
                                       <div className="h-8 w-px bg-slate-50 shrink-0" />
 
                                       <div className="flex gap-16 ml-4">
@@ -418,7 +394,11 @@ export default function ReportingPage() {
                                           </div>
                                           <div className="space-y-0">
                                             <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Wydajność</p>
-                                            <p className="text-xl font-black text-slate-800 font-mono tracking-tighter leading-none">{line.stats.oee.toFixed(1)}%</p>
+                                            {line.stats.hasPlan ? (
+                                              <p className="text-xl font-black text-slate-800 font-mono tracking-tighter leading-none">{fmtPct(line.stats.oee)}</p>
+                                            ) : (
+                                              <span className="inline-flex items-center text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-1 rounded-md border border-slate-100">Brak planu</span>
+                                            )}
                                           </div>
                                         </div>
 
@@ -491,7 +471,8 @@ export default function ReportingPage() {
                                     </div>
                                   )}
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         </div>
