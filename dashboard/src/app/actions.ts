@@ -12,32 +12,34 @@ export const getHallsWithLines = unstable_cache(
   async () => {
     const now = new Date();
 
-    try {
-      console.log('--- FETCHING HALLS START (DB QUERY) ---');
-      const halls = await prisma.hall.findMany({
-        include: {
-          lines: {
-            include: {
-              history: {
-                orderBy: [
-                  { time: 'desc' },
-                ],
-                take: 1,
+    // UWAGA: NIE łapiemy błędu DB cichym `return []` — pusta tablica jest
+    // nie do odróżnienia od stanu "brak hali" i wprowadzała operatora w błąd
+    // ("Brak danych. Uruchom seed bazy danych" przy padniętym Postgresie).
+    // Rzucamy dalej, error boundary Next.js pokaże komunikat awarii.
+    console.log('--- FETCHING HALLS START (DB QUERY) ---');
+    const halls = await prisma.hall.findMany({
+      include: {
+        lines: {
+          include: {
+            history: {
+              orderBy: [
+                { time: 'desc' },
+              ],
+              take: 1,
+            },
+            plans: {
+              where: {
+                startTime: { lte: now },
+                endTime: { gte: now },
               },
-              plans: {
-                where: {
-                  startTime: { lte: now },
-                  endTime: { gte: now },
-                },
-                take: 1,
-              },
-              _count: {
-                select: {
-                  scrap: {
-                    where: {
-                      time: {
-                        gte: new Date(Date.now() - 60 * 60 * 1000),
-                      },
+              take: 1,
+            },
+            _count: {
+              select: {
+                scrap: {
+                  where: {
+                    time: {
+                      gte: new Date(Date.now() - 60 * 60 * 1000),
                     },
                   },
                 },
@@ -45,18 +47,14 @@ export const getHallsWithLines = unstable_cache(
             },
           },
         },
-      });
+      },
+    });
 
-      console.log(`--- FETCHED ${halls.length} HALLS ---`);
-      // Serializacja dat przed wysłaniem do Client Component
-      return JSON.parse(JSON.stringify(halls));
-    } catch (error) {
-      console.error('CRITICAL ERROR IN getHallsWithLines:', error);
-      return [];
-    }
+    console.log(`--- FETCHED ${halls.length} HALLS ---`);
+    return JSON.parse(JSON.stringify(halls));
   },
   ['halls-overview'],
-  { revalidate: 2, tags: ['halls-data'] } // Cache na 2 sekundy, tag do manualnej rewalidacji
+  { revalidate: 2, tags: ['halls-data'] }
 );
 
 /**
@@ -238,85 +236,78 @@ export async function getHalls() {
  * ZOPTYMALIZOWANE: Pobiera tylko zmiany stanu (status/speed), nie wszystkie punkty
  */
 export async function getLineDetails(lineId: string, from: Date, to: Date) {
-  try {
-    const linePromise = prisma.line.findUnique({
-      where: { id: lineId },
-      include: {
-        plans: {
-          where: {
-            OR: [
-              { startTime: { lte: to }, endTime: { gte: from } }
-            ]
-          },
-          orderBy: { startTime: 'asc' }
+  // Bez try/catch: jeśli DB padnie, error propaguje do error boundary Next.js
+  // i operator dostanie wyraźny komunikat awarii zamiast 404 "Nie znaleziono linii".
+  const linePromise = prisma.line.findUnique({
+    where: { id: lineId },
+    include: {
+      plans: {
+        where: {
+          OR: [
+            { startTime: { lte: to }, endTime: { gte: from } }
+          ]
         },
-        scrap: {
-          where: {
-            time: { gte: from, lte: to }
-          }
-        },
-        comments: {
-          where: {
-            OR: [
-              { startTime: { lte: to }, endTime: { gte: from } }
-            ]
-          }
+        orderBy: { startTime: 'asc' }
+      },
+      scrap: {
+        where: {
+          time: { gte: from, lte: to }
+        }
+      },
+      comments: {
+        where: {
+          OR: [
+            { startTime: { lte: to }, endTime: { gte: from } }
+          ]
         }
       }
-    });
+    }
+  });
 
-    // Pobieramy historię za pomocą SQL, filtrując tylko zmiany
-    // Dodajemy też stan początkowy (ostatni punkt przed "from"), aby oś czasu wiedziała od czego zacząć
-    const historyPromise = prisma.$queryRaw<any[]>`
-      WITH raw_history AS (
-        -- Punkt początkowy (stan tuż przed zakresem)
-        (
-          SELECT "id", "time", "status", "speed"
-          FROM machine_status_history
-          WHERE "lineId" = ${lineId} AND "time" < ${from}
-          ORDER BY "time" DESC
-          LIMIT 1
-        )
-        UNION ALL
-        -- Punkty w zakresie
-        (
-          SELECT "id", "time", "status", "speed"
-          FROM machine_status_history
-          WHERE "lineId" = ${lineId} AND "time" >= ${from} AND "time" <= ${to}
-          ORDER BY "time" ASC
-        )
-      ),
-      changes AS (
-        SELECT 
-          "id", "time", "status", "speed",
-          LAG("status") OVER (ORDER BY "time") as "prev_status",
-          LAG("speed") OVER (ORDER BY "time") as "prev_speed"
-        FROM raw_history
+  const historyPromise = prisma.$queryRaw<any[]>`
+    WITH raw_history AS (
+      (
+        SELECT "id", "time", "status", "speed"
+        FROM machine_status_history
+        WHERE "lineId" = ${lineId} AND "time" < ${from}
+        ORDER BY "time" DESC
+        LIMIT 1
       )
-      SELECT "id", "time", "status", "speed"
-      FROM changes
-      WHERE "prev_status" IS NULL 
-         OR "status" IS DISTINCT FROM "prev_status"
-         OR ABS("speed" - "prev_speed") >= 0.5
-      ORDER BY "time" ASC;
-    `;
+      UNION ALL
+      (
+        SELECT "id", "time", "status", "speed"
+        FROM machine_status_history
+        WHERE "lineId" = ${lineId} AND "time" >= ${from} AND "time" <= ${to}
+        ORDER BY "time" ASC
+      )
+    ),
+    changes AS (
+      SELECT
+        "id", "time", "status", "speed",
+        LAG("status") OVER (ORDER BY "time") as "prev_status",
+        LAG("speed") OVER (ORDER BY "time") as "prev_speed"
+      FROM raw_history
+    )
+    SELECT "id", "time", "status", "speed"
+    FROM changes
+    WHERE "prev_status" IS NULL
+       OR "status" IS DISTINCT FROM "prev_status"
+       OR ABS("speed" - "prev_speed") >= 0.5
+    ORDER BY "time" ASC;
+  `;
 
-    const [line, history] = await Promise.all([linePromise, historyPromise]);
+  const [line, history] = await Promise.all([linePromise, historyPromise]);
 
-    if (!line) return null;
+  // `null` zarezerwowane dla "linia nie istnieje" — caller robi notFound().
+  if (!line) return null;
 
-    return {
-      ...line,
-      history: history.map(h => ({
-        ...h,
-        // Konwersja dla kompatybilności z Prisma types
-        time: h.time.toISOString() 
-      }))
-    };
-  } catch (error) {
-    console.error('Error fetching line details:', error);
-    return null;
-  }
+  return {
+    ...line,
+    history: history.map(h => ({
+      ...h,
+      time: h.time.toISOString()
+    }))
+  };
 }
 
 /**

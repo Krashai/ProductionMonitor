@@ -1,6 +1,7 @@
 import asyncio
 import os
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta, datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, status
@@ -44,26 +45,52 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise credentials_exception
 
 NOTIFY_TOKEN = os.getenv("NOTIFY_TOKEN")
+NOTIFY_URL = "http://dashboard-app:3000/api/notify"
+
+# Fire-and-forget pool: notify nie może blokować obsługi żądania HTTP
+# (CRUD endpointy też nie powinny czekać aż dashboard odpowie).
+_NOTIFY_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="notify")
+
+def _send_notify(payload: dict, headers: dict):
+    """POST z retry dla 5xx/network errors, early return dla 4xx."""
+    for attempt in (1, 2):
+        try:
+            resp = requests.post(NOTIFY_URL, json=payload, headers=headers, timeout=1.5)
+            if 500 <= resp.status_code < 600:
+                if attempt == 2:
+                    print(
+                        f"notify {payload.get('type')} HTTP {resp.status_code} after retry",
+                        flush=True,
+                    )
+                continue
+            if resp.status_code >= 400:
+                print(
+                    f"notify {payload.get('type')} HTTP {resp.status_code}: {resp.text[:200]}",
+                    flush=True,
+                )
+                return
+            return
+        except requests.exceptions.RequestException as e:
+            if attempt == 2:
+                print(
+                    f"notify {payload.get('type')} FAILED after retry: {e}",
+                    flush=True,
+                )
 
 def notify_dashboard(event_type: str = "REVALIDATE", line_id: str = None):
-    """Informuje Dashboard o zmianie stanu linii lub konfiguracji."""
+    """Submit notify do background pool — endpoint CRUD wraca natychmiast."""
+    payload = {"type": event_type}
+    if line_id:
+        payload["lineId"] = line_id
+
+    headers = {"Content-Type": "application/json"}
+    if NOTIFY_TOKEN:
+        headers["X-Notify-Token"] = NOTIFY_TOKEN
+
     try:
-        payload = {"type": event_type}
-        if line_id:
-            payload["lineId"] = line_id
-
-        headers = {}
-        if NOTIFY_TOKEN:
-            headers["X-Notify-Token"] = NOTIFY_TOKEN
-
-        requests.post(
-            "http://dashboard-app:3000/api/notify",
-            json=payload,
-            headers=headers,
-            timeout=1,
-        )
-    except Exception:
-        pass
+        _NOTIFY_POOL.submit(_send_notify, payload, headers)
+    except RuntimeError:
+        print(f"notify {event_type}: executor shut down", flush=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

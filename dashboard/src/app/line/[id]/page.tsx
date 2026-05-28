@@ -1,5 +1,3 @@
-'use client'
-
 import { getLineDetails } from "@/app/actions";
 import { notFound } from "next/navigation";
 import { LineDiagnostics } from "@/components/LineDiagnostics";
@@ -7,45 +5,26 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { subHours, format } from "date-fns";
 import { StatusBadge } from "@/components/StatusBadge";
-import { useRealtimeUpdates } from "@/hooks/useRealtime";
-import { use, useEffect, useState } from "react";
+
+// Dynamiczny render: każde wywołanie (w tym router.refresh() po evencie SSE)
+// musi przejść przez tę funkcję ponownie, żeby pobrać świeże dane PLC.
+// Bez tego strona /line/[id] zamarzała w stanie z chwili otwarcia karty.
+export const dynamic = 'force-dynamic';
 
 interface Props {
   params: Promise<{ id: string }>;
 }
 
-export default function LineDetailsPage({ params }: Props) {
-  const { id } = use(params);
-  const [line, setLine] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+export default async function LineDetailsPage({ params }: Props) {
+  const { id } = await params;
 
-  useRealtimeUpdates();
-
-  // Definiujemy daty w zasięgu komponentu, aby były dostępne w JSX
+  // Serwerowy "teraz" jest re-liczony przy każdym refresh — kursor "Teraz"
+  // na osi czasu przesuwa się po każdym ticku realtime.
   const now = new Date();
   const from = subHours(now, 24);
   const to = subHours(now, -8);
 
-  useEffect(() => {
-    const startTime = performance.now();
-    console.log(`[PERF] Fetching details for line ${id}...`);
-
-    getLineDetails(id, from, to).then(data => {
-      const endTime = performance.now();
-      console.log(`[PERF] Data fetched in ${(endTime - startTime).toFixed(2)}ms`);
-      setLine(data);
-      setLoading(false);
-      
-      // RequestAnimationFrame zapewnia, że mierzymy czas po tym, jak przeglądarka miała szansę na render
-      requestAnimationFrame(() => {
-        const renderTime = performance.now();
-        console.log(`[PERF] Full page ready in ${(renderTime - startTime).toFixed(2)}ms`);
-      });
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]); 
-
-  if (loading) return <div className="p-10 text-slate-400 italic">Ładowanie danych...</div>;
+  const line = await getLineDetails(id, from, to);
   if (!line) notFound();
 
   const latestStatus = line.history[line.history.length - 1]?.status;
@@ -53,7 +32,7 @@ export default function LineDetailsPage({ params }: Props) {
   return (
     <main className="h-screen bg-slate-50/30 overflow-hidden flex flex-col">
       <div className="max-w-[98%] mx-auto w-full px-6 py-4 flex flex-col h-full gap-4">
-        
+
         {/* SHARED HEADER */}
         <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4 shrink-0">
           <div>
@@ -75,7 +54,7 @@ export default function LineDetailsPage({ params }: Props) {
         </header>
 
         {/* CORE DIAGNOSTICS (TIMELINE + KPI + LOG) */}
-        <LineDiagnostics 
+        <LineDiagnostics
           lineId={line.id}
           initialPlans={line.plans}
           initialHistory={line.history}

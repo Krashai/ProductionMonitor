@@ -14,6 +14,7 @@ interface Line {
   name: string;
   plcId: string;
   isOnline: boolean;
+  lastSeenAt: string | null;
   history: { status: boolean; speed: number; time: string }[];
   plans: { id: string; productIndex: string }[];
   _count: { scrap: number };

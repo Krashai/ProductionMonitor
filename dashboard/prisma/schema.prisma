@@ -25,6 +25,10 @@ model Line {
   plcId    String  @unique
   name     String
   isOnline Boolean @default(false)
+  // Heartbeat z gateway — UI traktuje linię jako offline jeśli
+  // now() - lastSeenAt > próg, niezależnie od isOnline (gateway-down
+  // nie ma jak zresetować isOnline=true do false).
+  lastSeenAt DateTime?
 
   // Connection settings
   ip   String @default("127.0.0.1")

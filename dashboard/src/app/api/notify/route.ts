@@ -12,20 +12,28 @@ const ALLOWED_TYPES: ReadonlyArray<RealtimeEvent['type']> = [
 const NOTIFY_TOKEN = process.env.NOTIFY_TOKEN
 
 if (!NOTIFY_TOKEN) {
-  // Świadoma decyzja: pozwalamy wystartować bez tokenu, ale głośno
-  // ostrzegamy. Na produkcji koniecznie ustawić NOTIFY_TOKEN w env.
+  if (process.env.NODE_ENV === 'production') {
+    // Fail-fast przy załadowaniu modułu (czyli przy pierwszym żądaniu do
+    // /api/notify). Endpoint nie zacznie obsługiwać żądań bez tokenu —
+    // każda próba dostanie 500 z tego throw. Lepsze niż cichy 401 i
+    // znikanie eventów w `except`-ach gateway.
+    throw new Error(
+      '[notify] NOTIFY_TOKEN must be set in production. Refusing to handle requests.',
+    )
+  }
   console.warn(
-    '[notify] NOTIFY_TOKEN is not set — /api/notify will accept any request. Set it in production.',
+    '[notify] NOTIFY_TOKEN is not set — /api/notify will accept any request (dev mode). Set it in production.',
   )
 }
 
 function verifyToken(req: NextRequest): boolean {
-  if (!NOTIFY_TOKEN) return false
+  // Dev convenience: brak tokenu = przepuszczamy (warning na starcie).
+  // W produkcji ta gałąź jest nieosiągalna (throw powyżej).
+  if (!NOTIFY_TOKEN) return true
+
   const provided = req.headers.get('x-notify-token') ?? ''
   const expected = NOTIFY_TOKEN
 
-  // Constant-time porównanie — długości muszą się zgadzać, inaczej
-  // timingSafeEqual rzuca. Wyrównujemy przez Buffer.from na tej samej długości.
   const a = Buffer.from(provided, 'utf8')
   const b = Buffer.from(expected, 'utf8')
   if (a.length !== b.length) return false

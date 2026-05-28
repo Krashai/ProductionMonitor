@@ -22,7 +22,11 @@ class Line(Base):
     plcId = Column("plcId", String, unique=True, nullable=False)
     name = Column(String, nullable=False)
     isOnline = Column("isOnline", Boolean, default=False, nullable=False)
-    
+    # Heartbeat workera. Dashboard używa do wykrycia "gateway down":
+    # jeśli now() - lastSeenAt > 30s, UI traktuje linię jako offline
+    # niezależnie od isOnline (gateway-down nie ma jak zresetować flagi).
+    lastSeenAt = Column("lastSeenAt", DateTime(timezone=True), nullable=True)
+
     # Connection settings
     ip = Column(String, default="127.0.0.1", nullable=False)
     rack = Column(Integer, default=0, nullable=False)

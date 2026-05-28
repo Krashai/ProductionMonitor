@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useState } from "react";
 import { StatusBadge } from "./StatusBadge";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -9,11 +12,17 @@ interface LineCardProps {
     name: string;
     plcId: string;
     isOnline: boolean;
+    lastSeenAt: string | null;
     history: { status: boolean; speed: number; time: string }[];
     plans: { id: string; productIndex: string }[];
     _count: { scrap: number };
   };
 }
+
+// Po 30s ciszy z gateway uznajemy linię za offline niezależnie od isOnline.
+// Worker zapisuje heartbeat co 10s (touch_last_seen), więc 30s = 3 stracone heartbeaty.
+// Chroni przed "gateway-down" pokazującym stare wartości jako żywe.
+const STALE_THRESHOLD_MS = 30_000;
 
 export function LineCard({ line }: LineCardProps) {
   const latest = line.history[0];
@@ -23,9 +32,26 @@ export function LineCard({ line }: LineCardProps) {
   const activePlan = line.plans[0];
   const hasActivePlan = !!activePlan;
 
-  const isWorkingAsPlanned = hasActivePlan && currentStatus === true && line.isOnline;
-  const isAlarmState = hasActivePlan && currentStatus === false && line.isOnline;
-  const isOffline = !line.isOnline;
+  // Tick co 5s żeby badge przeszedł w "offline" automatycznie po przekroczeniu
+  // progu, nawet bez router.refresh() (np. gateway umarł i przestał wysyłać eventy).
+  // SSR + hydration: initial state = false (mamy świeże dane), useEffect ustawia
+  // poprawną wartość po mount — unika hydration mismatch z Date.now().
+  const [isStale, setIsStale] = useState(false);
+
+  useEffect(() => {
+    const lastSeenMs = line.lastSeenAt ? new Date(line.lastSeenAt).getTime() : 0;
+    const check = () => {
+      setIsStale(!lastSeenMs || Date.now() - lastSeenMs > STALE_THRESHOLD_MS);
+    };
+    check();
+    const interval = setInterval(check, 5_000);
+    return () => clearInterval(interval);
+  }, [line.lastSeenAt]);
+
+  const isOffline = !line.isOnline || isStale;
+
+  const isWorkingAsPlanned = hasActivePlan && currentStatus === true && !isOffline;
+  const isAlarmState = hasActivePlan && currentStatus === false && !isOffline;
 
   return (
     <Link href={`/line/${line.id}`} className={cn("block group", isOffline && "opacity-75 grayscale-[0.5]")}>

@@ -3,6 +3,9 @@ import requests
 import time
 import threading
 import asyncio
+import traceback
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import snap7
 from app.core.models import PLCConfig
 from app.plc.utils import decode_tag_value
@@ -11,21 +14,54 @@ from app.db.session import SessionLocal
 from app.db.models import Line, MachineStatusHistory, ScrapEvent
 
 NOTIFY_TOKEN = os.getenv("NOTIFY_TOKEN")
+NOTIFY_URL = "http://dashboard-app:3000/api/notify"
 
-# Pomocnicza funkcja do powiadomień
+# Fire-and-forget pool dla notify: HTTP POST nie może blokować pętli PLC.
+# Wcześniej synchroniczny request z timeout=0.5s mógł zatrzymać poll na 2-4s
+# przy wolnym dashboardzie — całkowicie podkopując poll_rate=1s.
+# max_workers=4 wystarczy na nasz wolumen eventów (publish-on-change, nie poll).
+_NOTIFY_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="notify")
+
+def _send_notify(payload: dict, headers: dict):
+    """Wykonuje POST z retry tylko dla 5xx/network errors. 4xx wychodzi natychmiast
+    (401/400 nie naprawi retry). Każdy fail logowany — operator dowie się o ciszy."""
+    for attempt in (1, 2):
+        try:
+            resp = requests.post(NOTIFY_URL, json=payload, headers=headers, timeout=1.0)
+            if 500 <= resp.status_code < 600:
+                # transient — spróbuj drugi raz
+                if attempt == 2:
+                    print(
+                        f"notify {payload.get('type')} line={payload.get('lineId')} HTTP {resp.status_code} after retry",
+                        flush=True,
+                    )
+                continue
+            if resp.status_code >= 400:
+                # 4xx — nie naprawi się przez retry (np. 401 brak tokenu)
+                print(
+                    f"notify {payload.get('type')} line={payload.get('lineId')} HTTP {resp.status_code}: {resp.text[:200]}",
+                    flush=True,
+                )
+                return
+            return  # 2xx/3xx success
+        except requests.exceptions.RequestException as e:
+            if attempt == 2:
+                print(
+                    f"notify {payload.get('type')} line={payload.get('lineId')} FAILED after retry: {e}",
+                    flush=True,
+                )
+
 def notify_dashboard(event_type: str, line_id: str):
+    """Submit notify do background pool — wraca natychmiast, nie blokuje workera."""
+    headers = {"Content-Type": "application/json"}
+    if NOTIFY_TOKEN:
+        headers["X-Notify-Token"] = NOTIFY_TOKEN
+    payload = {"type": event_type, "lineId": line_id}
     try:
-        headers = {}
-        if NOTIFY_TOKEN:
-            headers["X-Notify-Token"] = NOTIFY_TOKEN
-        requests.post(
-            "http://dashboard-app:3000/api/notify",
-            json={"type": event_type, "lineId": line_id},
-            headers=headers,
-            timeout=0.5,
-        )
-    except Exception:
-        pass
+        _NOTIFY_POOL.submit(_send_notify, payload, headers)
+    except RuntimeError:
+        # Pool został zamknięty (shutdown w trakcie) — log i kontynuuj.
+        print(f"notify {event_type} line={line_id}: executor shut down", flush=True)
 
 class PLCWorker(threading.Thread):
     def __init__(self, config: PLCConfig, loop: asyncio.AbstractEventLoop, poll_rate: float = 1.0):
@@ -38,6 +74,9 @@ class PLCWorker(threading.Thread):
         self.last_values = {}  # Cache dla mechanizmu publish-on-change
         self.line_internal_id = None
         self.last_db_online_status = None
+        # Throttle dla touch_last_seen — heartbeat zapisujemy max raz na 10s,
+        # żeby nie spamować bazą przy poll_rate=1s.
+        self._last_seen_written_at = 0.0
 
     def connect(self):
         """Próba połączenia ze sterownikiem PLC."""
@@ -70,6 +109,31 @@ class PLCWorker(threading.Thread):
         finally:
             db.close()
 
+    def touch_last_seen(self):
+        """Zapisuje "linia żyje TERAZ" w lines.lastSeenAt.
+
+        Dashboard porównuje to z bieżącym czasem żeby wykryć "gateway down" —
+        jeśli proces zginął, lastSeenAt zamarznie i UI pokaże offline po progu.
+        Throttle 10s żeby nie generować ruchu w DB przy poll_rate=1s.
+        """
+        if not self.line_internal_id:
+            return
+        now = time.time()
+        if now - self._last_seen_written_at < 10.0:
+            return
+        db = SessionLocal()
+        try:
+            db.query(Line).filter(Line.id == self.line_internal_id).update(
+                {"lastSeenAt": datetime.now(timezone.utc)}
+            )
+            db.commit()
+            self._last_seen_written_at = now
+        except Exception as e:
+            print(f"LAST_SEEN UPDATE ERROR for {self.config.id}: {e}", flush=True)
+            db.rollback()
+        finally:
+            db.close()
+
     def update_online_status(self):
         """Aktualizuje status isOnline w bazie danych, jeśli się zmienił."""
         if not self.line_internal_id:
@@ -88,52 +152,76 @@ class PLCWorker(threading.Thread):
                 db.close()
 
     def run(self):
-        """Główna pętla odczytu PLC."""
+        """Główna pętla odczytu PLC.
+
+        Outer try/except chroni wątek przed cichą śmiercią: wcześniej wyjątek
+        w find_line_id/update_online_status/broadcast_update zabijał daemon-thread
+        bez logu, a linia "zamarzała" w UI z ostatnim znanym stanem online=True.
+        """
         while self.running:
             start_time = time.time()
-            has_db_line = self.find_line_id()
-            
-            is_connected = self.connect()
-            
-            if is_connected:
-                try:
-                    current_cycle_values = {}
-                    dbs = {}
-                    for tag in self.config.tags:
-                        if tag.db not in dbs: dbs[tag.db] = []
-                        dbs[tag.db].append(tag)
+            is_connected = False
+            has_db_line = False
+            try:
+                has_db_line = self.find_line_id()
+                is_connected = self.connect()
 
-                    for db_num, tags in dbs.items():
-                        max_offset = max(t.offset for t in tags) + 4
-                        if any(t.type.upper() == "STRING" for t in tags):
-                            max_offset = max(max_offset, 256 + max(t.offset for t in tags if t.type.upper() == "STRING"))
+                if is_connected:
+                    try:
+                        current_cycle_values = {}
+                        dbs = {}
+                        for tag in self.config.tags:
+                            if tag.db not in dbs: dbs[tag.db] = []
+                            dbs[tag.db].append(tag)
 
-                        raw_data = self.client.db_read(db_num, 0, max_offset)
+                        for db_num, tags in dbs.items():
+                            max_offset = max(t.offset for t in tags) + 4
+                            if any(t.type.upper() == "STRING" for t in tags):
+                                max_offset = max(max_offset, 256 + max(t.offset for t in tags if t.type.upper() == "STRING"))
 
-                        for tag in tags:
-                            bit_val = getattr(tag, 'bit', 0)
-                            val = decode_tag_value(raw_data, tag.offset, tag.type, bit_val)
-                            if val is not None:
-                                tag.value = val
-                                current_cycle_values[tag.name] = val
-                    
-                    if has_db_line:
-                        self.sync_cycle_to_db(current_cycle_values)
-                    
-                    self.config.online = True
-                except Exception as e:
-                    self.config.online = False
-                    self.client.disconnect()
-            
-            if has_db_line:
-                self.update_online_status()
-            
-            # Broadcast tylko gdy online lub przy zmianie statusu
-            if is_connected or self.config.online != self.last_db_online_status:
-                self.broadcast_update()
-            
+                            raw_data = self.client.db_read(db_num, 0, max_offset)
+
+                            for tag in tags:
+                                bit_val = getattr(tag, 'bit', 0)
+                                val = decode_tag_value(raw_data, tag.offset, tag.type, bit_val)
+                                if val is not None:
+                                    tag.value = val
+                                    current_cycle_values[tag.name] = val
+
+                        if has_db_line:
+                            self.sync_cycle_to_db(current_cycle_values)
+
+                        self.config.online = True
+                    except Exception as e:
+                        print(f"PLC READ ERROR for {self.config.id}: {e}", flush=True)
+                        self.config.online = False
+                        try:
+                            self.client.disconnect()
+                        except Exception:
+                            pass
+
+                if has_db_line:
+                    self.update_online_status()
+                    # Heartbeat dla dashboardu: zapisujemy "linia żyje TERAZ".
+                    # Bez tego dashboard nie odróżni martwego gateway od stojącej linii.
+                    self.touch_last_seen()
+
+                # Broadcast tylko gdy online lub przy zmianie statusu
+                if is_connected or self.config.online != self.last_db_online_status:
+                    self.broadcast_update()
+            except MemoryError:
+                # OOM jest realny na Raspberry Pi — wątek nie powinien
+                # kontynuować w nieznanym stanie pamięci. Pozwalamy propagować.
+                raise
+            except Exception as e:
+                # Nadrzędny safety net — daemon-thread nie może umrzeć po cichu.
+                print(
+                    f"PLCWorker {self.config.id} LOOP ERROR (recovering): {e}",
+                    flush=True,
+                )
+                traceback.print_exc()
+
             elapsed = time.time() - start_time
-            
             # Jeśli brak połączenia, czekaj dłużej (5s zamiast 1s)
             dynamic_poll = self.poll_rate if is_connected else 5.0
             sleep_time = max(0.1, dynamic_poll - elapsed)
@@ -212,7 +300,6 @@ class PLCWorker(threading.Thread):
                 db.commit()
         except Exception as e:
             print(f"DB CYCLE WRITE ERROR for {self.config.id}: {e}", flush=True)
-            import traceback
             traceback.print_exc()
             db.rollback()
         finally:

@@ -6,14 +6,19 @@ import type { RealtimeStatus } from '@/hooks/useRealtime'
 
 interface Props {
   status: RealtimeStatus
+  /** Ostatni BUSINESS event. null = brak zmian od mount — to nie awaria. */
   lastEventAt: Date | null
   className?: string
 }
 
 /**
  * Wskaźnik stanu kanału real-time.
- * W monitoringu produkcji operator MUSI od razu widzieć, czy patrzy
- * na żywe dane, czy na zdjęcie sprzed X minut.
+ *
+ * Tooltip rozróżnia dwie sytuacje, które wcześniej wyglądały tak samo:
+ * - connected + lastEventAt null → "LIVE, bez zmian" (zdrowy idle)
+ * - connected + lastEventAt stary → "LIVE, ostatnia zmiana o HH:MM"
+ * Bez tego operator widział "Ostatnia aktualizacja: 11:43" i myślał, że
+ * coś nie działa, choć linia po prostu stabilnie pracowała.
  */
 export function ConnectionStatus({ status, lastEventAt, className }: Props) {
   const label =
@@ -21,6 +26,13 @@ export function ConnectionStatus({ status, lastEventAt, className }: Props) {
 
   const Icon =
     status === 'connected' ? Radio : status === 'connecting' ? Loader2 : WifiOff
+
+  const titleText = (() => {
+    if (status === 'disconnected') return 'Brak połączenia z serwerem. Próba wznowienia w toku.'
+    if (status === 'connecting') return 'Łączenie z serwerem realtime...'
+    if (!lastEventAt) return 'LIVE — brak zmian od otwarcia karty (linia stabilna).'
+    return `LIVE — ostatnia zmiana: ${lastEventAt.toLocaleTimeString('pl-PL')}`
+  })()
 
   return (
     <div
@@ -31,11 +43,7 @@ export function ConnectionStatus({ status, lastEventAt, className }: Props) {
         status === 'disconnected' && 'bg-rose-50 border-rose-100 text-rose-700',
         className,
       )}
-      title={
-        lastEventAt
-          ? `Ostatnia aktualizacja: ${lastEventAt.toLocaleTimeString('pl-PL')}`
-          : 'Brak aktualizacji w tej sesji'
-      }
+      title={titleText}
     >
       <Icon
         size={12}
