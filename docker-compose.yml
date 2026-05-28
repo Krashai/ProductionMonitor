@@ -15,6 +15,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
       - TZ=Europe/Warsaw
+      - NOTIFY_TOKEN=${NOTIFY_TOKEN:-change-me-in-production}
     depends_on:
       dashboard-db-init:
         condition: service_completed_successfully
@@ -96,6 +97,7 @@ services:
       - DATABASE_URL=postgresql://user:password@dashboard-db:5432/line_gantt
       - NODE_ENV=production
       - TZ=Europe/Warsaw
+      - NOTIFY_TOKEN=${NOTIFY_TOKEN:-change-me-in-production}
     networks:
       - prod_net
     restart: always

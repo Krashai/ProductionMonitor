@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 import { useRealtimeUpdates } from "@/hooks/useRealtime";
+import { ConnectionStatus } from "./ConnectionStatus";
 
 interface Line {
   id: string;
@@ -35,7 +36,7 @@ export function MainDashboard({ halls }: Props) {
   const router = useRouter();
 
   // Aktywujemy subskrypcję zdarzeń Real-time (zamiast pollowania)
-  useRealtimeUpdates();
+  const { status: realtimeStatus, lastEventAt } = useRealtimeUpdates();
 
   const ROTATION_TIME = 10000;
 
@@ -112,6 +113,8 @@ export function MainDashboard({ halls }: Props) {
 
         {/* Pasek Postępu i Link do Planowania */}
         <div className="flex items-center gap-10">
+          <ConnectionStatus status={realtimeStatus} lastEventAt={lastEventAt} />
+
           <div className="flex items-center gap-4 group">
             <div className="w-48 h-1.5 bg-slate-100 rounded-full overflow-hidden">
               <div 

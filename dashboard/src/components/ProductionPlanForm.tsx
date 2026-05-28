@@ -80,9 +80,12 @@ export function ProductionPlanForm({ lines, allPlans, initialData, onSuccess }: 
     if (result.success) {
       setMessage({ type: 'success', text: isEdit ? 'Zaktualizowano.' : 'Dodano pomyślnie.' });
       if (onSuccess) setTimeout(onSuccess, 1000);
-    } else if (result.warning) {
+    } else if ('warning' in result && result.warning) {
+      // Tylko addProductionPlan zwraca ścieżkę warning; updateProductionPlan
+      // nigdy. Zawężenie przez `in` pozwala TS dostać `message` z variantu
+      // ostrzeżenia bez rzutowania.
       setWarning(result.message || 'Kolizja w planie.');
-    } else {
+    } else if ('error' in result) {
       setMessage({ type: 'error', text: result.error || 'Błąd.' });
     }
     setLoading(false);

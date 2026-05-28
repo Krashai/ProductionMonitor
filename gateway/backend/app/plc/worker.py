@@ -1,3 +1,4 @@
+import os
 import requests
 import time
 import threading
@@ -9,13 +10,21 @@ from app.api.websocket import manager as ws_manager
 from app.db.session import SessionLocal
 from app.db.models import Line, MachineStatusHistory, ScrapEvent
 
+NOTIFY_TOKEN = os.getenv("NOTIFY_TOKEN")
+
 # Pomocnicza funkcja do powiadomień
 def notify_dashboard(event_type: str, line_id: str):
     try:
-        requests.post("http://dashboard-app:3000/api/notify", 
-                      json={"type": event_type, "lineId": line_id}, 
-                      timeout=0.5)
-    except:
+        headers = {}
+        if NOTIFY_TOKEN:
+            headers["X-Notify-Token"] = NOTIFY_TOKEN
+        requests.post(
+            "http://dashboard-app:3000/api/notify",
+            json={"type": event_type, "lineId": line_id},
+            headers=headers,
+            timeout=0.5,
+        )
+    except Exception:
         pass
 
 class PLCWorker(threading.Thread):

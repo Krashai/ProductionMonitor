@@ -1,4 +1,5 @@
 import asyncio
+import os
 import requests
 from datetime import timedelta, datetime
 from contextlib import asynccontextmanager
@@ -42,17 +43,26 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
 
+NOTIFY_TOKEN = os.getenv("NOTIFY_TOKEN")
+
 def notify_dashboard(event_type: str = "REVALIDATE", line_id: str = None):
     """Informuje Dashboard o zmianie stanu linii lub konfiguracji."""
     try:
-        # Próbujemy uderzyć w nowy endpoint notify
         payload = {"type": event_type}
         if line_id:
             payload["lineId"] = line_id
-            
-        requests.post("http://dashboard-app:3000/api/notify", json=payload, timeout=1)
-    except Exception as e:
-        # print(f"NOTIFICATION ERROR: {e}")
+
+        headers = {}
+        if NOTIFY_TOKEN:
+            headers["X-Notify-Token"] = NOTIFY_TOKEN
+
+        requests.post(
+            "http://dashboard-app:3000/api/notify",
+            json=payload,
+            headers=headers,
+            timeout=1,
+        )
+    except Exception:
         pass
 
 @asynccontextmanager

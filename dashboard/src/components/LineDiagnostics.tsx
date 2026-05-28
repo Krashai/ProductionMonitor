@@ -7,6 +7,39 @@ import { cn } from '@/lib/utils';
 import { addDowntimeComment, updateDowntimeComment } from '@/app/actions';
 import { X, Send, AlertCircle, MousePointer2, MessageSquareText, PencilLine, Plus, Timer, Gauge, Ban, History, Activity } from 'lucide-react';
 import { KPICard } from './KPICard';
+import { useRealtimeUpdates } from '@/hooks/useRealtime';
+import { ConnectionStatus } from './ConnectionStatus';
+
+type HistoryEntry = { time: string | Date; status: boolean; speed: number | string | null; _time: number };
+type Segment = { start: Date; end: Date; type: 'running' | 'downtime' };
+
+// Binary search: ostatni indeks taki że sortedHistory[i]._time <= targetMs, lub -1.
+// Kluczowe dla carry-forward — dane są sparse (zapis tylko przy zmianie), więc
+// stan na dowolny moment = stan ostatniego wpisu przed tym momentem.
+function findAnchorIndex(sortedHistory: HistoryEntry[], targetMs: number): number {
+  let lo = 0, hi = sortedHistory.length - 1, result = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedHistory[mid]._time <= targetMs) {
+      result = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return result;
+}
+
+// Dokleja segment do listy, scalając z poprzednim jeśli ten sam typ i stykają się.
+function pushSegment(segs: Segment[], startMs: number, endMs: number, running: boolean): Segment[] {
+  if (endMs <= startMs) return segs;
+  const type: 'running' | 'downtime' = running ? 'running' : 'downtime';
+  const last = segs[segs.length - 1];
+  if (last && last.type === type && last.end.getTime() === startMs) {
+    return [...segs.slice(0, -1), { ...last, end: new Date(endMs) }];
+  }
+  return [...segs, { start: new Date(startMs), end: new Date(endMs), type }];
+}
 
 interface Props {
   lineId: string;
@@ -18,6 +51,12 @@ interface Props {
 }
 
 export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialComments, from: fromStr, to: toStr }: Props) {
+  // Subskrypcja realtime: bez tego /line/[id] pokazywałby nieaktualne dane do
+  // czasu ręcznego F5. Hook robi router.refresh() z trailing debounce, więc
+  // Server Component page.tsx ponownie woła getLineDetails i strumieniuje
+  // świeże `initialHistory`/`initialPlans`/`initialComments` jako nowe props.
+  const { status: realtimeStatus, lastEventAt } = useRealtimeUpdates();
+
   const [mounted, setMounted] = useState(false);
   const from = useMemo(() => new Date(fromStr), [fromStr]);
   const to = useMemo(() => new Date(toStr), [toStr]);
@@ -38,76 +77,68 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
     return () => clearInterval(interval);
   }, []);
 
-  // --- PRZYGOTOWANIE DANYCH ---
-  const history = useMemo(() => initialHistory.map(h => ({
-    ...h,
-    time: new Date(h.time)
-  })), [initialHistory]);
-
-  const plans = useMemo(() => initialPlans.map(p => ({
-    ...p,
-    startTime: new Date(p.startTime),
-    endTime: new Date(p.endTime)
-  })), [initialPlans]);
-
-  const comments = useMemo(() => initialComments.map(c => ({
-    ...c,
-    startTime: new Date(c.startTime),
-    endTime: new Date(c.endTime)
-  })), [initialComments]);
+  // Jedno sortowanie historii (z precomputed _time) używane przez KPI i planLanes.
+  // initialHistory zawiera zakotwiczenie (wpis sprzed okna) dodane przez getLineDetails —
+  // dzięki temu carry-forward działa też dla linii bez zmian stanu w oknie.
+  const sortedHistory = useMemo<HistoryEntry[]>(
+    () =>
+      [...initialHistory]
+        .map((h) => ({ ...h, _time: new Date(h.time).getTime() }))
+        .sort((a, b) => a._time - b._time),
+    [initialHistory],
+  );
 
   // --- LOGIKA KPI ---
+  // Carry-forward: dane są sparse, więc dla każdego planu bierzemy stan "zakotwiczony"
+  // w ostatnim wpisie <= rangeStart i iterujemy przez zmiany wewnątrz zakresu.
+  // Bez tego KPI ignorowało czas od rangeStart do pierwszej zmiany wewnątrz okna —
+  // linia stabilnie pracująca miała Dostępność 0%.
   const kpi = useMemo(() => {
     let totalPlannedMinutes = 0;
     let actualWorkMinutes = 0;
     let speedSum = 0;
     let speedCount = 0;
 
-    plans.forEach(plan => {
-      const rangeStart = plan.startTime < from ? from : plan.startTime;
-      const rangeEnd = plan.endTime > now ? now : plan.endTime;
-      
-      if (rangeStart < rangeEnd) {
-        totalPlannedMinutes += differenceInMinutes(rangeEnd, rangeStart);
-        
-        // Znajdujemy stan początkowy (ostatni wpis przed lub w momencie rangeStart)
-        const initialIndex = history.findLastIndex(h => h.time <= rangeStart);
-        let currentStatus = initialIndex !== -1 ? history[initialIndex].status : false;
-        let currentSpeed = initialIndex !== -1 ? history[initialIndex].speed : 0;
+    for (const plan of initialPlans) {
+      const pStart = new Date(plan.startTime).getTime();
+      const pEnd = new Date(plan.endTime).getTime();
+      const rangeStart = Math.max(pStart, from.getTime());
+      const rangeEnd = Math.min(pEnd, now.getTime());
+      if (rangeStart >= rangeEnd) continue;
 
-        // Bierzemy wszystkie zdarzenia wewnątrz tego planu
-        const eventsInPlan = history.filter(h => h.time > rangeStart && h.time <= rangeEnd);
-        
-        // Tworzymy listę punktów kontrolnych: [rangeStart, ...events, rangeEnd]
-        const checkPoints = [
-          { time: rangeStart, status: currentStatus, speed: currentSpeed },
-          ...eventsInPlan,
-          { time: rangeEnd, status: currentStatus, speed: currentSpeed } // status/speed tutaj nie ma znaczenia dla ostatniego segmentu
-        ];
+      totalPlannedMinutes += (rangeEnd - rangeStart) / 60000;
+      const plannedSpeed = parseFloat(plan.plannedSpeed) || 1;
 
-        for (let i = 0; i < checkPoints.length - 1; i++) {
-          const start = checkPoints[i].time;
-          const end = checkPoints[i+1].time;
-          const status = checkPoints[i].status;
-          const speed = checkPoints[i].speed;
-          
-          const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
-          if (durationMinutes <= 0) continue;
+      const anchorIdx = findAnchorIndex(sortedHistory, rangeStart);
+      let currentStatus: boolean = anchorIdx >= 0 ? sortedHistory[anchorIdx].status === true : false;
+      let currentSpeed: number = anchorIdx >= 0 ? Number(sortedHistory[anchorIdx].speed) || 0 : 0;
+      let cursor = rangeStart;
 
-          if (status && speed > 0) {
-            actualWorkMinutes += durationMinutes;
-            const plannedSpeed = parseFloat(plan.plannedSpeed) || 1;
-            const ratio = speed / plannedSpeed;
-            speedSum += Math.min(ratio, 1) * durationMinutes; 
-            speedCount += durationMinutes;
-          }
-        }
+      const accumulate = (startMs: number, endMs: number, status: boolean, speed: number) => {
+        if (endMs <= startMs) return;
+        if (!status || speed <= 0) return;
+        const durationMinutes = (endMs - startMs) / 60000;
+        actualWorkMinutes += durationMinutes;
+        const ratio = speed / plannedSpeed;
+        speedSum += Math.min(ratio, 1) * durationMinutes;
+        speedCount += durationMinutes;
+      };
+
+      for (let i = Math.max(0, anchorIdx + 1); i < sortedHistory.length; i++) {
+        const h = sortedHistory[i];
+        if (h._time <= cursor) continue;
+        if (h._time >= rangeEnd) break;
+        accumulate(cursor, h._time, currentStatus, currentSpeed);
+        currentStatus = h.status === true;
+        currentSpeed = Number(h.speed) || 0;
+        cursor = h._time;
       }
-    });
+      accumulate(cursor, rangeEnd, currentStatus, currentSpeed);
+    }
 
     const availability = totalPlannedMinutes > 0 ? (actualWorkMinutes / totalPlannedMinutes) * 100 : 0;
     const performance = speedCount > 0 ? (speedSum / speedCount) * 100 : 0;
-    
+
     const downtimeTotal = Math.max(0, totalPlannedMinutes - actualWorkMinutes);
     const downtimeHours = Math.floor(downtimeTotal / 60);
     const downtimeMinutes = Math.round(downtimeTotal % 60);
@@ -116,13 +147,13 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
       availability: Math.min(availability, 100),
       performance: Math.min(performance, 100),
       downtimeHours,
-      downtimeMinutes
+      downtimeMinutes,
     };
-  }, [plans, history, from, now]);
+  }, [initialPlans, sortedHistory, from, now]);
 
   // --- LOGIKA OSI CZASU ---
   const getPosition = (date: Date) => {
-    const diff = (date.getTime() - from.getTime()) / (1000 * 60);
+    const diff = differenceInMinutes(new Date(date), from);
     return Math.max(0, Math.min(100, (diff / totalMinutes) * 100));
   };
 
@@ -132,38 +163,44 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
   }, [from, to]);
 
   // ALGORYTM UKŁADANIA W TORACH (LANES)
+  // Carry-forward: zamiast testować "czy w 15-min oknie był wpis z status=true"
+  // (co dla stabilnie pracującej maszyny dawało fałszywe downtime'y, bo sparse-data
+  // nie zapisuje kolejnych cykli gdy nic się nie zmienia), bierzemy stan zakotwiczony
+  // w ostatnim wpisie <= planStart i budujemy segmenty na podstawie rzeczywistych zmian.
   const planLanes = useMemo(() => {
-    const segments = plans.map(plan => {
-      const segs: { start: Date; end: Date; type: 'running' | 'downtime' }[] = [];
-      const planStart = plan.startTime < from ? from : plan.startTime;
-      const planEnd = plan.endTime > to ? to : plan.endTime;
-      
-      if (planStart >= planEnd) return { ...plan, segments: [] };
-      
-      let current = planStart;
-      while (current < planEnd) {
-        const next = addMinutes(current, 15);
-        const segmentEnd = next > planEnd ? planEnd : next;
-        
-        // Szukamy ostatniego znanego statusu przed końcem tego segmentu
-        const lastEventIdx = history.findLastIndex(h => h.time <= segmentEnd);
-        const isActive = lastEventIdx !== -1 ? history[lastEventIdx].status : false;
-        
-        segs.push({ start: current, end: segmentEnd, type: isActive ? 'running' : 'downtime' });
-        current = next;
+    const segments = initialPlans.map(plan => {
+      let segs: Segment[] = [];
+      const planStartMs = Math.max(new Date(plan.startTime).getTime(), from.getTime());
+      const planEndMs = Math.min(new Date(plan.endTime).getTime(), to.getTime());
+      if (planStartMs >= planEndMs) return { ...plan, segments: [] };
+
+      const anchorIdx = findAnchorIndex(sortedHistory, planStartMs);
+      let currentStatus: boolean = anchorIdx >= 0 ? sortedHistory[anchorIdx].status === true : false;
+      let cursor = planStartMs;
+
+      for (let i = Math.max(0, anchorIdx + 1); i < sortedHistory.length; i++) {
+        const h = sortedHistory[i];
+        if (h._time <= cursor) continue;
+        if (h._time >= planEndMs) break;
+        segs = pushSegment(segs, cursor, h._time, currentStatus);
+        currentStatus = h.status === true;
+        cursor = h._time;
       }
+      segs = pushSegment(segs, cursor, planEndMs, currentStatus);
+
       return { ...plan, segments: segs };
     }).filter(p => p.segments.length > 0);
 
     // Sortowanie po czasie startu
-    segments.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+    segments.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
     const lanes: any[][] = [];
     segments.forEach(plan => {
       let added = false;
       for (const lane of lanes) {
         const lastInLane = lane[lane.length - 1];
-        if (plan.startTime >= lastInLane.endTime) {
+        // Jeśli ten plan zaczyna się po zakończeniu ostatniego w tym torze (z marginesem 1 min)
+        if (new Date(plan.startTime) >= new Date(lastInLane.endTime)) {
           lane.push(plan);
           added = true;
           break;
@@ -172,11 +209,11 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
       if (!added) lanes.push([plan]);
     });
     return lanes;
-  }, [plans, history, from, to]);
+  }, [initialPlans, sortedHistory, from, to]);
 
   // --- OBSŁUGA INTERAKCJI ---
   const handleEditClick = (comment: any) => {
-    setModalData({ start: comment.startTime, end: comment.endTime, existingId: comment.id });
+    setModalData({ start: new Date(comment.startTime), end: new Date(comment.endTime), existingId: comment.id });
     setCommentText(comment.comment);
     setActionChoice(null);
   };
@@ -222,9 +259,16 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
   async function handleSaveComment() {
     if (!modalData || !commentText.trim()) return;
     setIsSaving(true);
-    const result = modalData.existingId ? await updateDowntimeComment(modalData.existingId, commentText) : await addDowntimeComment({ lineId, startTime: modalData.start, endTime: modalData.end, comment: commentText });
-    if (result.success) { setModalData(null); setCommentText(''); }
-    setIsSaving(false);
+    try {
+      const result = modalData.existingId
+        ? await updateDowntimeComment(modalData.existingId, commentText)
+        : await addDowntimeComment({ lineId, startTime: modalData.start, endTime: modalData.end, comment: commentText });
+      if (result.success) { setModalData(null); setCommentText(''); }
+    } catch (err) {
+      console.error('Failed to save comment:', err);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   if (!mounted) return <div className="h-full bg-white animate-pulse" />;
@@ -238,6 +282,7 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
             <Activity size={14} />
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">Praca Maszyny</span>
           </div>
+          <ConnectionStatus status={realtimeStatus} lastEventAt={lastEventAt} />
         </div>
         
         <div className="relative w-full bg-white pt-24 pb-10 px-10 overflow-x-visible min-h-[200px] select-none">
@@ -258,9 +303,10 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
             {planLanes.map((lane, lIdx) => (
               <div key={lIdx} className="relative h-16 w-full">
                 {lane.map((plan, pIdx) => {
-                  const planStartPos = getPosition(plan.startTime);
-                  const planWidth = getPosition(plan.endTime) - planStartPos;
+                  const planStartPos = getPosition(new Date(plan.startTime));
+                  const planWidth = getPosition(new Date(plan.endTime)) - planStartPos;
                   
+                  // Etykiety są naprzemienne dla torów, aby uniknąć kolizji pionowej
                   const labelTop = lIdx % 2 === 0 ? "-top-8" : "-top-12";
                   const connectorHeight = lIdx % 2 === 0 ? "h-8" : "h-12";
 
@@ -273,30 +319,30 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
                       <div className="absolute inset-0 flex bg-slate-50/50 rounded-xl border border-slate-100 shadow-[inset_0_2px_10px_rgb(0,0,0,0.02)] overflow-visible z-10" onMouseUp={onMouseUp}>
                         {plan.segments.map((seg: any, idx: number) => {
                           const segWidth = ((getPosition(seg.end) - getPosition(seg.start)) / planWidth) * 100;
-                          
-                          const matchingComments = comments.filter(c => {
-                            return (c.startTime <= seg.start && c.endTime >= seg.end) || (isWithinInterval(c.startTime, { start: seg.start, end: seg.end }));
+
+                          // Standardowy test overlap przedziałów: [cStart, cEnd) ∩ [seg.start, seg.end) ≠ ∅.
+                          // Poprzedni warunek gubił komentarze zaczynające się PRZED segmentem
+                          // (np. awaria ciągnąca się przez kilka segmentów — widoczna tylko na pierwszym).
+                          const segStartMs = seg.start.getTime();
+                          const segEndMs = seg.end.getTime();
+                          const matchingComments = initialComments.filter(c => {
+                            const cStart = new Date(c.startTime).getTime();
+                            const cEnd = new Date(c.endTime).getTime();
+                            return cStart < segEndMs && cEnd > segStartMs;
                           });
                           const isBeingSelected = selectionRange && isWithinInterval(seg.start, { start: selectionRange.start, end: selectionRange.end });
                           const shouldShowDot = matchingComments.some(c => {
-                            const midTime = new Date((c.startTime.getTime() + c.endTime.getTime()) / 2);
+                            const midTime = new Date((new Date(c.startTime).getTime() + new Date(c.endTime).getTime()) / 2);
                             return isWithinInterval(midTime, { start: seg.start, end: seg.end });
                           });
 
-                          const isFuture = seg.start > now;
-                          
                           return (
                             <div key={idx}
                               onMouseDown={(e) => onMouseDown(e, seg.start, seg.type, matchingComments)}
-                              onMouseEnter={() => onMouseMove({ clientX: 0, clientY: 0 } as any, seg.start)}
                               className={cn(
                                 "h-full border-r border-white/5 last:border-0 relative transition-all group/seg",
-                                isFuture 
-                                  ? "bg-slate-200 cursor-default" 
-                                  : seg.type === 'running' 
-                                    ? "bg-emerald-500" 
-                                    : "bg-rose-500 cursor-crosshair hover:brightness-110 shadow-inner",
-                                isBeingSelected && !isFuture && "ring-4 ring-blue-400 ring-inset z-[60] brightness-125",
+                                seg.type === 'running' ? "bg-emerald-500" : "bg-rose-500 cursor-crosshair hover:brightness-110 shadow-inner",
+                                isBeingSelected && "ring-4 ring-blue-400 ring-inset z-[60] brightness-125",
                                 shouldShowDot && "after:absolute after:top-1/2 after:left-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:w-2.5 after:h-2.5 after:bg-white after:rounded-full after:shadow-lg after:border-2 after:border-rose-500"
                               )}
                               style={{ width: `${segWidth}%` }}
@@ -306,7 +352,7 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
                                 <div className="absolute opacity-0 group-hover/seg:opacity-100 transition-opacity bottom-full left-0 z-[100] pb-4 pointer-events-none min-w-[280px]">
                                   <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-2xl border border-slate-800 space-y-3 text-left">
                                     <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-1"><div className="flex items-center gap-2"><MessageSquareText size={16} className="text-blue-400" /><span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Analiza Przestoju</span></div><PencilLine size={14} className="text-slate-500" /></div>
-                                    {matchingComments.map((c, i) => <div key={i} className="space-y-1 border-b border-white/5 last:border-0 pb-2 last:pb-0 text-left"><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{format(c.startTime, 'HH:mm', { locale: pl })} - {format(c.endTime, 'HH:mm', { locale: pl })}</p><p className="text-sm font-semibold italic text-slate-100">"{c.comment}"</p></div>)}
+                                    {matchingComments.map((c, i) => <div key={i} className="space-y-1 border-b border-white/5 last:border-0 pb-2 last:pb-0 text-left"><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{format(new Date(c.startTime), 'HH:mm', { locale: pl })} - {format(new Date(c.endTime), 'HH:mm', { locale: pl })}</p><p className="text-sm font-semibold italic text-slate-100">"{c.comment}"</p></div>)}
                                   </div>
                                   <div className="w-4 h-4 bg-slate-900 rotate-45 absolute bottom-2 left-6"></div>
                                 </div>
@@ -336,21 +382,21 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
           <div className="bg-white border border-slate-200 rounded-[2.5rem] shadow-sm overflow-hidden flex flex-col h-full">
             <div className="p-6 border-b border-slate-50 bg-slate-50/30 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3"><div className="p-2 bg-slate-900 rounded-lg text-white"><History size={16} /></div><h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-slate-900">Log Zdarzeń</h3></div>
-              <span className="bg-slate-100 text-slate-500 text-[10px] font-black px-3 py-1 rounded-full border border-slate-200">{comments.length}</span>
+              <span className="bg-slate-100 text-slate-500 text-[10px] font-black px-3 py-1 rounded-full border border-slate-200">{initialComments.length}</span>
             </div>
             <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar bg-white">
-              {comments.length === 0 ? (
+              {initialComments.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-200 gap-4"><MessageSquareText size={48} strokeWidth={1} /><p className="text-[10px] font-black uppercase tracking-[0.2em]">Brak opisanych awarii</p></div>
               ) : (
-                [...comments].reverse().map((c) => (
+                [...initialComments].reverse().map((c) => (
                   <div key={c.id} onClick={() => handleEditClick(c)} className="relative pl-8 py-1 group border-l-2 border-slate-100 hover:border-blue-500 transition-colors cursor-pointer text-left">
                     <div className="flex items-center justify-between mb-3 text-left">
                       <div className="flex items-center gap-3 text-left">
-                        <span className="text-[14px] font-black text-slate-900 font-mono tracking-tight">{format(c.startTime, 'HH:mm', { locale: pl })}</span>
+                        <span className="text-[14px] font-black text-slate-900 font-mono tracking-tight">{format(new Date(c.startTime), 'HH:mm', { locale: pl })}</span>
                         <span className="text-slate-300">—</span>
-                        <span className="text-[14px] font-black text-slate-900 font-mono tracking-tight">{format(c.endTime, 'HH:mm', { locale: pl })}</span>
+                        <span className="text-[14px] font-black text-slate-900 font-mono tracking-tight">{format(new Date(c.endTime), 'HH:mm', { locale: pl })}</span>
                       </div>
-                      <span className="text-[9px] font-black bg-rose-50 text-rose-600 px-2 py-0.5 rounded uppercase tracking-widest border border-rose-100">{differenceInMinutes(c.endTime, c.startTime)} min</span>
+                      <span className="text-[9px] font-black bg-rose-50 text-rose-600 px-2 py-0.5 rounded uppercase tracking-widest border border-rose-100">{differenceInMinutes(new Date(c.endTime), new Date(c.startTime))} min</span>
                     </div>
                     <p className="text-[16px] font-medium text-slate-600 leading-relaxed italic group-hover:text-slate-900 transition-colors">"{c.comment}"</p>
                     <div className="absolute left-[-6px] top-2 w-2.5 h-2.5 rounded-full bg-white border-2 border-slate-200 group-hover:border-blue-500 transition-colors shadow-sm"></div>

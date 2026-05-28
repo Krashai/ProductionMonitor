@@ -11,7 +11,6 @@ import { format } from 'date-fns';
 export const getHallsWithLines = unstable_cache(
   async () => {
     const now = new Date();
-    const recentThreshold = new Date(now.getTime() - 5 * 60 * 1000); // 5 minut wstecz
 
     try {
       console.log('--- FETCHING HALLS START (DB QUERY) ---');
