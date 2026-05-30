@@ -24,10 +24,18 @@ export async function loginPlanning(formData: FormData) {
   const expiresAt = Date.now() + PLANNING_SESSION_DURATION_MS;
   const token = signSession(expiresAt);
 
+  // Flaga Secure: domyślnie true w produkcji (HTTPS). Gdy dashboard jest
+  // wystawiony po zwykłym HTTP (np. nginx :80 dla sieci operatorów),
+  // ustaw PLANNING_COOKIE_INSECURE=true — inaczej przeglądarka odrzuci
+  // cookie sesji i logowanie nie zadziała.
+  const secureCookie =
+    process.env.NODE_ENV === 'production' &&
+    process.env.PLANNING_COOKIE_INSECURE !== 'true';
+
   const cookieStore = await cookies();
   cookieStore.set(PLANNING_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: secureCookie,
     sameSite: 'lax',
     maxAge: Math.floor(PLANNING_SESSION_DURATION_MS / 1000),
     path: '/',

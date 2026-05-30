@@ -102,6 +102,9 @@ services:
       # Brak wartości w .env → docker compose przerwie z czytelnym błędem.
       - PLANNING_PASSWORD=${PLANNING_PASSWORD:?PLANNING_PASSWORD musi być ustawione w .env}
       - PLANNING_SESSION_SECRET=${PLANNING_SESSION_SECRET:?PLANNING_SESSION_SECRET musi być ustawione w .env (openssl rand -hex 32)}
+      # Ustaw na "true" gdy dashboard jest wystawiony po HTTP (nginx :80),
+      # inaczej cookie sesji z flagą Secure nie zadziała. Domyślnie false (HTTPS).
+      - PLANNING_COOKIE_INSECURE=${PLANNING_COOKIE_INSECURE:-false}
     networks:
       - prod_net
     restart: always
