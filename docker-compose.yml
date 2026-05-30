@@ -98,6 +98,10 @@ services:
       - NODE_ENV=production
       - TZ=Europe/Warsaw
       - NOTIFY_TOKEN=${NOTIFY_TOKEN:-change-me-in-production}
+      # Hasło i sekret sesji /planning ładowane z .env (patrz .env.example).
+      # Brak wartości w .env → docker compose przerwie z czytelnym błędem.
+      - PLANNING_PASSWORD=${PLANNING_PASSWORD:?PLANNING_PASSWORD musi być ustawione w .env}
+      - PLANNING_SESSION_SECRET=${PLANNING_SESSION_SECRET:?PLANNING_SESSION_SECRET musi być ustawione w .env (openssl rand -hex 32)}
     networks:
       - prod_net
     restart: always

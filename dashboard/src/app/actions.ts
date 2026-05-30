@@ -3,6 +3,13 @@
 import { prisma } from '@/lib/prisma';
 import { revalidatePath, unstable_cache } from 'next/cache';
 import { format } from 'date-fns';
+import type {
+  ImportConflict,
+  ImportLine,
+  ImportPreview,
+  ImportRow,
+} from '@/lib/import-types';
+import { requirePlanningAccess } from '@/lib/auth';
 
 /**
  * Pobiera wszystkie hale wraz z liniami i ich aktualnym stanem
@@ -70,6 +77,8 @@ export async function addProductionPlan(data: {
   plannedSpeed: number;
   ignoreWarning?: boolean; // Pozwala wymusić zapis mimo kolizji
 }) {
+  const gate = await requirePlanningAccess();
+  if (gate) return gate;
   try {
     // 1. Sprawdź kolizje
     const overlap = await prisma.productionPlan.findFirst({
@@ -119,6 +128,8 @@ export async function updateProductionPlan(id: string, data: {
   plannedSpeed?: number;
   lineId?: string;
 }) {
+  const gate = await requirePlanningAccess();
+  if (gate) return gate;
   try {
     // Jeśli zmieniamy czasy lub linię, sprawdź kolizje (wykluczając obecny rekord)
     if (data.startTime || data.endTime || data.lineId) {
@@ -164,6 +175,8 @@ export async function updateProductionPlan(id: string, data: {
  * Usuwa zlecenie z planu
  */
 export async function deleteProductionPlan(id: string) {
+  const gate = await requirePlanningAccess();
+  if (gate) return gate;
   try {
     const deleted = await prisma.productionPlan.delete({
       where: { id },
@@ -705,4 +718,206 @@ async function getLineIncidents(lineId: string, from: Date, to: Date) {
   }
 
   return allIncidents;
+}
+
+// ─── Import planu produkcji z Excela ─────────────────────────────────────────
+
+/**
+ * Pobiera listę linii (id, plcId, name, hallName) potrzebną do mapowania
+ * zasobów z pliku Excel na linie z bazy.
+ */
+export async function getImportLines(): Promise<ImportLine[]> {
+  try {
+    const lines = await prisma.line.findMany({
+      select: {
+        id: true,
+        plcId: true,
+        name: true,
+        hall: { select: { name: true } },
+      },
+      orderBy: [{ hall: { name: 'asc' } }, { name: 'asc' }],
+    });
+    return lines.map((l) => ({
+      id: l.id,
+      plcId: l.plcId,
+      name: l.name,
+      hallName: l.hall.name,
+    }));
+  } catch (error) {
+    console.error('Error fetching import lines:', error);
+    return [];
+  }
+}
+
+// Limity zabezpieczające serwerową ścieżkę importu przed nadużyciem
+const IMPORT_MAX_ROWS = 5000;
+const IMPORT_MAX_SPEED = 10000; // m/min
+const IMPORT_HORIZON_MS = 365 * 24 * 60 * 60 * 1000; // ±1 rok od „teraz"
+
+/**
+ * Sprawdza konflikty i (opcjonalnie) wykonuje import planu produkcji.
+ *
+ * `confirmed=false`: zwraca podgląd (nowe / kolidujące),
+ * `confirmed=true`: w jednej transakcji usuwa stare kolidujące plany i zapisuje nowe.
+ *
+ * Gdy `confirmed=true`, klient musi przekazać `approvedConflictIds` z poprzedniego
+ * podglądu — jeśli baza zawiera teraz dodatkowe konflikty (inny użytkownik
+ * dodał plan), action odmówi wykonania, żeby nie usunąć nic, czego użytkownik
+ * nie zatwierdził.
+ */
+export async function checkAndExecuteImport(
+  rows: ImportRow[],
+  confirmed: boolean = false,
+  approvedConflictIds?: string[]
+): Promise<
+  | { success: true; preview: ImportPreview }
+  | { success: true; imported: number }
+  | { success: false; error: string }
+> {
+  const gate = await requirePlanningAccess();
+  if (gate) return gate;
+  try {
+    if (rows.length === 0) {
+      return { success: false, error: 'Brak wierszy do importu.' };
+    }
+    if (rows.length > IMPORT_MAX_ROWS) {
+      return {
+        success: false,
+        error: `Za dużo wierszy do importu (max ${IMPORT_MAX_ROWS}).`,
+      };
+    }
+
+    // Walidacja prędkości — finite + dolny i górny limit
+    const invalidSpeed = rows.filter(
+      (r) =>
+        !Number.isFinite(r.plannedSpeed) ||
+        r.plannedSpeed <= 0 ||
+        r.plannedSpeed > IMPORT_MAX_SPEED
+    );
+    if (invalidSpeed.length > 0) {
+      return {
+        success: false,
+        error: `Nieprawidłowa prędkość dla ${invalidSpeed.length} zleceń.`,
+      };
+    }
+
+    // Walidacja zakresu dat — chroni `deleteMany` przed sterowanym przez klienta
+    // szerokim oknem czasowym (klient nie może wymusić skasowania planów spoza
+    // sensownego horyzontu planowania).
+    const now = Date.now();
+    const horizonStart = now - IMPORT_HORIZON_MS;
+    const horizonEnd = now + IMPORT_HORIZON_MS;
+    const invalidDate = rows.some((r) => {
+      const s = new Date(r.startTime).getTime();
+      const e = new Date(r.endTime).getTime();
+      if (!Number.isFinite(s) || !Number.isFinite(e)) return true;
+      if (s >= e) return true;
+      if (s < horizonStart || e > horizonEnd) return true;
+      return false;
+    });
+    if (invalidDate) {
+      return {
+        success: false,
+        error:
+          'Nieprawidłowy zakres dat (start ≥ koniec lub poza horyzontem ±1 rok).',
+      };
+    }
+
+    const lineIds = [...new Set(rows.map((r) => r.lineId))];
+
+    // Walidacja istnienia linii — odrzucamy podrobione lub usunięte lineId
+    const validLines = await prisma.line.findMany({
+      where: { id: { in: lineIds } },
+      select: { id: true },
+    });
+    if (validLines.length !== lineIds.length) {
+      return {
+        success: false,
+        error: 'Nieznana linia produkcyjna w danych do importu.',
+      };
+    }
+
+    const allStarts = rows.map((r) => new Date(r.startTime).getTime());
+    const allEnds = rows.map((r) => new Date(r.endTime).getTime());
+    const rangeStart = new Date(Math.min(...allStarts));
+    const rangeEnd = new Date(Math.max(...allEnds));
+
+    const existingConflicts = await prisma.productionPlan.findMany({
+      where: {
+        lineId: { in: lineIds },
+        AND: [{ startTime: { lt: rangeEnd } }, { endTime: { gt: rangeStart } }],
+      },
+      include: { line: { include: { hall: true } } },
+      orderBy: { startTime: 'asc' },
+    });
+
+    const conflictingExisting: ImportConflict[] = existingConflicts.map((p) => ({
+      id: p.id,
+      lineId: p.lineId,
+      lineName: `${p.line.hall.name} — ${p.line.name}`,
+      productIndex: p.productIndex,
+      startTime: p.startTime,
+      endTime: p.endTime,
+    }));
+
+    const conflictingLineIds = new Set(conflictingExisting.map((c) => c.lineId));
+    const conflictingNew = rows.filter((r) => {
+      if (!conflictingLineIds.has(r.lineId)) return false;
+      return existingConflicts.some(
+        (c) =>
+          c.lineId === r.lineId &&
+          new Date(r.startTime) < c.endTime &&
+          new Date(r.endTime) > c.startTime
+      );
+    });
+    const conflictingNewIds = new Set(conflictingNew.map((r) => r.id));
+    const newRows = rows.filter((r) => !conflictingNewIds.has(r.id));
+
+    if (!confirmed) {
+      return {
+        success: true,
+        preview: { newRows, conflictingExisting, conflictingNew },
+      };
+    }
+
+    // Race-condition guard: na confirm sprawdzamy, że konflikty pokrywają się z tymi
+    // zaaprobowanymi w podglądzie. Jeśli ktoś dorzucił plan między preview a confirm,
+    // odmawiamy importu, żeby nie skasować nic, czego użytkownik nie widział.
+    const approvedSet = new Set(approvedConflictIds ?? []);
+    const unexpectedConflicts = conflictingExisting.filter(
+      (c) => !approvedSet.has(c.id)
+    );
+    if (unexpectedConflicts.length > 0) {
+      return {
+        success: false,
+        error:
+          'W bazie pojawiły się nowe kolidujące plany od ostatniego podglądu. Wykonaj „Sprawdź konflikty" ponownie.',
+      };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (existingConflicts.length > 0) {
+        await tx.productionPlan.deleteMany({
+          where: { id: { in: existingConflicts.map((c) => c.id) } },
+        });
+      }
+      await tx.productionPlan.createMany({
+        data: rows.map((r) => ({
+          lineId: r.lineId,
+          productIndex: r.productIndex,
+          startTime: new Date(r.startTime),
+          endTime: new Date(r.endTime),
+          plannedSpeed: r.plannedSpeed,
+        })),
+      });
+    });
+
+    revalidatePath('/');
+    revalidatePath('/planning');
+
+    return { success: true, imported: rows.length };
+  } catch (error) {
+    console.error('Error during import:', error);
+    return { success: false, error: 'Błąd podczas importu. Spróbuj ponownie.' };
+  }
 }
