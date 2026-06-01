@@ -1,6 +1,11 @@
 import { getHallsWithLines } from "./actions";
 import { MainDashboard } from "@/components/MainDashboard";
 
+// Wallboard pokazuje dane produkcyjne na żywo — render per żądanie, bez
+// statycznego prerenderu (przy buildzie nie ma bazy/DATABASE_URL, a fetch
+// rzuca przy braku DB). Spójne z /reporting, /planning, /line/[id].
+export const dynamic = 'force-dynamic';
+
 export default async function Home() {
   const halls = await getHallsWithLines();
 
