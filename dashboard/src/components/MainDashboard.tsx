@@ -72,9 +72,9 @@ export function MainDashboard({ halls }: Props) {
   );
 
   return (
-    <div className="max-w-[1800px] mx-auto px-8 py-6">
-      {/* MINIMALISTYCZNY NAVBAR */}
-      <header className="flex items-center justify-between mb-12 py-4 border-b border-slate-100 sticky top-0 bg-white/80 backdrop-blur-md z-50">
+    <div className="h-full flex flex-col max-w-[2400px] mx-auto px-6 2xl:px-10 py-4">
+      {/* MINIMALISTYCZNY NAVBAR — w trybie kiosk strona się nie przewija, więc shrink-0 */}
+      <header className="shrink-0 flex items-center justify-between mb-4 2xl:mb-6 pb-4 border-b border-slate-100">
         <div className="flex items-center gap-8">
           {/* Play/Pause */}
           <button 
@@ -148,19 +148,27 @@ export function MainDashboard({ halls }: Props) {
           </Link>        </div>
       </header>
 
-      {/* TREŚĆ - KAFELKI */}
-      <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-        <div className="flex items-center gap-4 mb-10">
-          <h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase">
+      {/* TREŚĆ - KAFELKI: wypełnia pozostałą wysokość, siatka wyśrodkowana w pionie */}
+      <div className="flex-1 min-h-0 flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-500">
+        <div className="shrink-0 flex items-center gap-4 mb-4 2xl:mb-6">
+          <h2 className="text-3xl 2xl:text-5xl font-black text-slate-900 tracking-tighter uppercase leading-none">
             {currentHall?.name}
           </h2>
-          <div className="h-1 flex-1 bg-slate-50 mt-4 rounded-full"></div>
+          <div className="h-1 flex-1 bg-slate-50 rounded-full"></div>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-          {currentHall?.lines?.map((line: Line) => (
-            <LineCard key={line.id} line={line} />
-          ))}
+
+        {/* Karty mają naturalną, kompaktową wysokość (bez rozciągania na cały ekran,
+            więc brak pustki między metrykami a stopką). Siatka zakotwiczona tuż pod
+            tytułem (items-start) — tytuł sekcji u góry, kafle bezpośrednio pod nim. */}
+        <div className="flex-1 min-h-0 overflow-hidden flex items-start">
+          {/* Stała liczba kolumn (3 na ≥lg, 4 na ≥2xl) — szerokość karty jest taka
+              sama niezależnie od liczby linii w hali. Hala z 2 liniami pokazuje 2
+              kompaktowe karty i zostawia puste tory po prawej, zamiast je rozciągać. */}
+          <div className="grid w-full gap-5 2xl:gap-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {currentHall?.lines?.map((line: Line) => (
+              <LineCard key={line.id} line={line} />
+            ))}
+          </div>
         </div>
       </div>
     </div>
