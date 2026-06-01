@@ -11,25 +11,26 @@ const ALLOWED_TYPES: ReadonlyArray<RealtimeEvent['type']> = [
 
 const NOTIFY_TOKEN = process.env.NOTIFY_TOKEN
 
-if (!NOTIFY_TOKEN) {
-  if (process.env.NODE_ENV === 'production') {
-    // Fail-fast przy załadowaniu modułu (czyli przy pierwszym żądaniu do
-    // /api/notify). Endpoint nie zacznie obsługiwać żądań bez tokenu —
-    // każda próba dostanie 500 z tego throw. Lepsze niż cichy 401 i
-    // znikanie eventów w `except`-ach gateway.
-    throw new Error(
-      '[notify] NOTIFY_TOKEN must be set in production. Refusing to handle requests.',
-    )
-  }
+if (!NOTIFY_TOKEN && process.env.NODE_ENV !== 'production') {
   console.warn(
     '[notify] NOTIFY_TOKEN is not set — /api/notify will accept any request (dev mode). Set it in production.',
   )
 }
 
 function verifyToken(req: NextRequest): boolean {
-  // Dev convenience: brak tokenu = przepuszczamy (warning na starcie).
-  // W produkcji ta gałąź jest nieosiągalna (throw powyżej).
-  if (!NOTIFY_TOKEN) return true
+  if (!NOTIFY_TOKEN) {
+    if (process.env.NODE_ENV === 'production') {
+      // Fail-fast przy żądaniu: w produkcji bez tokenu odmawiamy obsługi —
+      // throw daje 500 na każdą próbę. Sprawdzenie TUTAJ, nie w module scope,
+      // bo `next build` ewaluuje moduł (collecting page data) zanim
+      // NOTIFY_TOKEN zostanie wstrzyknięty w runtime przez compose.
+      throw new Error(
+        '[notify] NOTIFY_TOKEN must be set in production. Refusing to handle requests.',
+      )
+    }
+    // Dev convenience: brak tokenu = przepuszczamy (warning na starcie).
+    return true
+  }
 
   const provided = req.headers.get('x-notify-token') ?? ''
   const expected = NOTIFY_TOKEN
