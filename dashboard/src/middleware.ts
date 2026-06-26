@@ -27,8 +27,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Wszystko pod /planning, włącznie z /planning/login (które wczesnie wraca next())
-  matcher: ['/planning/:path*'],
+  // Wszystko pod /planning (z /planning/login, które wcześnie zwraca next())
+  // oraz /config — ta sama bramka hasła i ta sama sesja cookie.
+  matcher: ['/planning/:path*', '/config/:path*'],
 };
 
 async function verifySessionEdge(

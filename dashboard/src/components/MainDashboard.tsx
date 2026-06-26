@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { LineCard } from "./LineCard";
-import { Play, Pause, CalendarPlus, BarChart3 } from "lucide-react";
+import { Play, Pause, CalendarPlus, BarChart3, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 import { useRealtimeUpdates } from "@/hooks/useRealtime";
 import { ConnectionStatus } from "./ConnectionStatus";
+import type { AppMode } from "@/lib/settings";
 
 interface Line {
   id: string;
@@ -28,9 +29,10 @@ interface Hall {
 
 interface Props {
   halls: Hall[];
+  mode: AppMode;
 }
 
-export function MainDashboard({ halls }: Props) {
+export function MainDashboard({ halls, mode }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -145,7 +147,16 @@ export function MainDashboard({ halls }: Props) {
           >
             <BarChart3 size={16} />
             <span className="text-[10px] font-black uppercase tracking-widest">Raporty</span>
-          </Link>        </div>
+          </Link>
+
+          <Link
+            href="/config"
+            className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
+          >
+            <SlidersHorizontal size={16} />
+            <span className="text-[10px] font-black uppercase tracking-widest">Konfiguracja</span>
+          </Link>
+        </div>
       </header>
 
       {/* TREŚĆ - KAFELKI: wypełnia pozostałą wysokość, siatka wyśrodkowana w pionie */}
@@ -166,7 +177,7 @@ export function MainDashboard({ halls }: Props) {
               kompaktowe karty i zostawia puste tory po prawej, zamiast je rozciągać. */}
           <div className="grid w-full gap-5 2xl:gap-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {currentHall?.lines?.map((line: Line) => (
-              <LineCard key={line.id} line={line} />
+              <LineCard key={line.id} line={line} mode={mode} />
             ))}
           </div>
         </div>
