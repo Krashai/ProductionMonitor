@@ -10,6 +10,7 @@ import { deriveLineVisualState, type LineVisualVariant } from "@/lib/line-visual
 
 interface LineCardProps {
   mode: AppMode;
+  compact?: boolean;
   line: {
     id: string;
     name: string;
@@ -46,7 +47,7 @@ function accentForVariant(variant: LineVisualVariant): Accent {
   }
 }
 
-export function LineCard({ line, mode }: LineCardProps) {
+export function LineCard({ line, mode, compact = false }: LineCardProps) {
   const latest = line.history[0];
   const currentStatus = latest?.status;
   const currentSpeed = latest?.speed || 0;
@@ -108,24 +109,31 @@ export function LineCard({ line, mode }: LineCardProps) {
       )}>
         {/* Pionowy pasek statusu */}
         <div className={cn(
-          "absolute left-0 top-0 bottom-0 w-2 2xl:w-2.5 transition-all duration-500",
+          "absolute left-0 top-0 bottom-0 transition-all duration-500",
+          compact ? "w-1" : "w-2 2xl:w-2.5",
           accent === 'green' ? "bg-emerald-500 shadow-[2px_0_15px_rgba(16,185,129,0.2)]" :
           accent === 'alarm' ? "bg-rose-500 shadow-[2px_0_20px_rgba(225,29,72,0.3)]" :
           accent === 'offline' ? "bg-slate-300" :
           "bg-slate-100"
         )} />
 
-        {/* TREŚĆ: nazwa u góry, metryki wyśrodkowane w pionie, stopka na dole.
-            min-h ujednolica wysokość kart online/offline (offline ma dodatkowy wiersz
-            „Brak połączenia") i daje metrykom trochę oddechu — bez rozciągania. */}
-        <div className="flex-1 flex flex-col p-5 pl-7 2xl:p-8 2xl:pl-10 min-h-[120px] 2xl:min-h-[150px]">
+        {/* TREŚĆ */}
+        <div className={cn(
+          "flex-1 flex flex-col",
+          compact
+            ? "p-2.5 pl-4 min-h-[60px]"
+            : "p-5 pl-7 2xl:p-8 2xl:pl-10 min-h-[120px] 2xl:min-h-[150px]"
+        )}>
           {/* Header */}
-          <div className="shrink-0 flex justify-between items-start gap-3">
-            <div className="space-y-1 min-w-0">
-              <h3 className="font-black text-slate-900 text-xl 2xl:text-2xl tracking-tighter uppercase leading-none group-hover:text-blue-600 transition-colors truncate">
+          <div className="shrink-0 flex justify-between items-start gap-2">
+            <div className="min-w-0">
+              <h3 className={cn(
+                "font-black text-slate-900 tracking-tighter uppercase leading-none group-hover:text-blue-600 transition-colors truncate",
+                compact ? "text-sm" : "text-xl 2xl:text-2xl"
+              )}>
                 {line.name}
               </h3>
-              {isOffline && (
+              {!compact && isOffline && (
                 <div className="flex items-center gap-1.5 text-rose-500 mt-2">
                   <Unplug size={12} className="shrink-0" />
                   <span className="text-[10px] font-black uppercase tracking-widest truncate">Brak połączenia</span>
@@ -135,51 +143,65 @@ export function LineCard({ line, mode }: LineCardProps) {
             <StatusBadge status={badgeStatus} />
           </div>
 
-          {/* Metryki — wyśrodkowane w dostępnej przestrzeni */}
+          {/* Metryki */}
           <div className="flex-1 min-h-0 flex items-center">
-            <div className="w-full flex items-end justify-between gap-4">
-              <div className="space-y-1 min-w-0">
-                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em]">Prędkość</p>
-                <div className="flex items-baseline gap-1.5 min-w-0">
+            <div className="w-full flex items-end justify-between gap-3">
+              <div className="min-w-0">
+                <p className={cn(
+                  "text-slate-400 font-bold uppercase",
+                  compact ? "text-[7px] tracking-[0.15em] mb-0.5" : "text-[9px] tracking-[0.2em] mb-1"
+                )}>Prędkość</p>
+                <div className="flex items-baseline gap-1 min-w-0">
                   <span className={cn(
-                    "text-4xl 2xl:text-5xl font-black font-mono tracking-tighter tabular-nums leading-none truncate",
+                    "font-black font-mono tracking-tighter tabular-nums leading-none truncate",
+                    compact ? "text-xl" : "text-4xl 2xl:text-5xl",
                     isAlarm ? "text-rose-600" : "text-slate-900",
                     isOffline && "text-slate-400"
                   )}>
                     {isOffline ? "---" : currentSpeed.toFixed(1)}
                   </span>
-                  <span className="text-[10px] font-bold text-slate-300 uppercase shrink-0">m/min</span>
+                  <span className={cn(
+                    "font-bold text-slate-300 uppercase shrink-0",
+                    compact ? "text-[7px]" : "text-[10px]"
+                  )}>m/min</span>
                 </div>
               </div>
 
-              <div className="space-y-1 min-w-0 text-right">
-                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em]">Scrap (1h)</p>
-                <div className="flex items-baseline justify-end gap-1.5 text-slate-900 min-w-0">
+              <div className="min-w-0 text-right">
+                <p className={cn(
+                  "text-slate-400 font-bold uppercase",
+                  compact ? "text-[7px] tracking-[0.15em] mb-0.5" : "text-[9px] tracking-[0.2em] mb-1"
+                )}>Scrap (1h)</p>
+                <div className="flex items-baseline justify-end gap-1 min-w-0">
                   <span className={cn(
-                    "text-4xl 2xl:text-5xl font-black font-mono tracking-tighter tabular-nums leading-none truncate",
+                    "font-black font-mono tracking-tighter tabular-nums leading-none truncate",
+                    compact ? "text-xl" : "text-4xl 2xl:text-5xl",
                     isOffline && "text-slate-400"
                   )}>
                     {isOffline ? "---" : scrapCount}
                   </span>
-                  <span className="text-[10px] font-bold text-slate-300 uppercase shrink-0">szt.</span>
+                  <span className={cn(
+                    "font-bold text-slate-300 uppercase shrink-0",
+                    compact ? "text-[7px]" : "text-[10px]"
+                  )}>szt.</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Dolna sekcja.
-            NO_PLAN_MODE: etykieta statusu (Linia pracuje / Postój / Brak połączenia).
-            PLAN_MODE: aktualny indeks zlecenia — DOKŁADNIE jak dotychczas. */}
+        {/* Dolna sekcja */}
         {isNoPlanMode ? (
           <div className={cn(
-            "shrink-0 px-7 2xl:px-10 py-3 2xl:py-4 border-t transition-colors",
+            "shrink-0 border-t transition-colors",
+            compact ? "px-4 py-1.5" : "px-7 2xl:px-10 py-3 2xl:py-4",
             isOffline ? "bg-slate-400 border-slate-400" :
             isGreen ? "bg-emerald-600 border-emerald-600" :
             "bg-slate-200 border-slate-200"
           )}>
             <span className={cn(
-              "text-sm font-black uppercase tracking-widest",
+              "font-black uppercase tracking-widest",
+              compact ? "text-[10px]" : "text-sm",
               isOffline ? "text-white/80" :
               isGreen ? "text-white" :
               "text-slate-600"
@@ -189,16 +211,26 @@ export function LineCard({ line, mode }: LineCardProps) {
           </div>
         ) : (
           <div className={cn(
-            "shrink-0 px-7 2xl:px-10 py-3 2xl:py-4 border-t transition-colors",
+            "shrink-0 border-t transition-colors",
+            compact ? "px-4 py-1.5" : "px-7 2xl:px-10 py-3 2xl:py-4",
             hasActivePlan ? (isOffline ? "bg-slate-400 border-slate-400" : "bg-slate-900 border-slate-900") : "bg-slate-50 border-slate-50"
           )}>
             {hasActivePlan ? (
-              <div className="flex justify-between items-center gap-3">
-                <span className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] shrink-0">Aktualny Indeks</span>
-                <span className="text-sm font-black text-white uppercase tracking-widest truncate">{activePlan.productIndex}</span>
+              <div className="flex justify-between items-center gap-2">
+                <span className={cn(
+                  "font-black text-white/40 uppercase shrink-0",
+                  compact ? "text-[8px] tracking-[0.2em]" : "text-[10px] tracking-[0.3em]"
+                )}>Aktualny Indeks</span>
+                <span className={cn(
+                  "font-black text-white uppercase tracking-widest truncate",
+                  compact ? "text-xs" : "text-sm"
+                )}>{activePlan.productIndex}</span>
               </div>
             ) : (
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Brak aktywnego zlecenia</span>
+              <span className={cn(
+                "font-bold text-slate-400 uppercase tracking-widest italic",
+                compact ? "text-[8px]" : "text-[10px]"
+              )}>Brak aktywnego zlecenia</span>
             )}
           </div>
         )}

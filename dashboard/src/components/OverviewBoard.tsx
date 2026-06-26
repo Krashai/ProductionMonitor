@@ -24,9 +24,14 @@ export function OverviewBoard({ halls, mode }: Props) {
   const activatedHalls = halls?.filter((h) => h.lines.length > 0) ?? [];
   const totalLines = activatedHalls.reduce((sum, h) => sum + h.lines.length, 0);
 
-  // Dep: totalLines — nie activatedHalls.length. Zmiana liczby linii w hali
-  // (nowa linia, usunięcie) zmienia wysokość contentu bez zmiany liczby hal.
-  const scale = useFitToViewport(containerRef, contentRef, [totalLines]);
+  // Kolumny siatki hal: 1→1, 2→2, 3→3 (jeden wiersz), 4→2 (2×2), 5-6→3, 7+→3.
+  // 3 hale w jednym wierszu zamiast 2+1 — unika sieroty i maksymalizuje szerokość hal.
+  const hallCols = activatedHalls.length <= 1 ? 1
+    : activatedHalls.length === 3 ? 3
+    : activatedHalls.length <= 4 ? 2
+    : 3;
+
+  const scale = useFitToViewport(containerRef, contentRef, [totalLines, hallCols]);
 
   if (activatedHalls.length === 0) {
     return (
@@ -97,21 +102,18 @@ export function OverviewBoard({ halls, mode }: Props) {
       >
         <div
           ref={contentRef}
-          className="flex flex-col gap-4 2xl:gap-5"
+          className="grid gap-4 2xl:gap-6"
           style={{
             transform: `scale(${scale})`,
             transformOrigin: 'top left',
-            // width: zawsze 100% — brak width-hacka. Transform nie zmienia layout-box,
-            // więc column-count przy pomiarze (useFitToViewport) = column-count przy
-            // renderowaniu. Przy scale<1 treść jest węższa wizualnie niż kontener —
-            // dopuszczalne dla kiosk fit-to-viewport gdzie priorytetem jest brak clippingu.
+            gridTemplateColumns: `repeat(${hallCols}, 1fr)`,
           }}
         >
           {activatedHalls.map((hall) => (
-            <div key={hall.id} className="flex-none flex flex-col">
+            <div key={hall.id} className="min-w-0 flex flex-col">
               {/* Nagłówek hali */}
-              <div className="shrink-0 flex items-center gap-4 mb-2 2xl:mb-3">
-                <h2 className="text-2xl 2xl:text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">
+              <div className="shrink-0 flex items-center gap-3 mb-2 2xl:mb-3">
+                <h2 className="text-xl 2xl:text-3xl font-black text-slate-900 tracking-tighter uppercase leading-none">
                   {hall.name}
                 </h2>
                 <div className="h-px flex-1 bg-slate-100 rounded-full" />
@@ -120,17 +122,15 @@ export function OverviewBoard({ halls, mode }: Props) {
                 </span>
               </div>
 
-              {/* Siatka linii — naturalna wysokość wierszy (bez grid-auto-rows 1fr).
-                  align-items: stretch (default) ujednolica karty w obrębie wiersza.
-                  auto-fill: 1→6+ kolumn zależnie od dostępnej szerokości po scale. */}
+              {/* Siatka linii: 10rem min → 3+ kolumn per hala przy 1366px, więcej na 4K. */}
               <div
-                className="grid gap-3 2xl:gap-4"
+                className="grid gap-2 2xl:gap-3"
                 style={{
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(18rem, 100%), 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(10rem, 100%), 1fr))',
                 }}
               >
                 {hall.lines.map((line) => (
-                  <LineCard key={line.id} line={line} mode={mode} />
+                  <LineCard key={line.id} line={line} mode={mode} compact />
                 ))}
               </div>
             </div>
