@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { LineCard } from "./LineCard";
-import { Play, Pause, CalendarPlus, BarChart3, SlidersHorizontal } from "lucide-react";
+import { Play, Pause, CalendarPlus, BarChart3, SlidersHorizontal, LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
@@ -132,6 +132,14 @@ export function MainDashboard({ halls, mode }: Props) {
               {currentIndex + 1}/{halls.length}
             </span>
           </div>
+
+          <Link
+            href="/overview"
+            className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
+          >
+            <LayoutGrid size={16} />
+            <span className="text-[10px] font-black uppercase tracking-widest">Przegląd</span>
+          </Link>
 
           <Link
             href="/planning"
