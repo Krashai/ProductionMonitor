@@ -89,6 +89,15 @@ model ScrapEvent {
   @@map("scrap_events")
 }
 
+// Klucz/wartość — globalne ustawienia aplikacji (np. tryb pracy dashboardu).
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
 model DowntimeComment {
   id        String   @id @default(cuid())
   lineId    String

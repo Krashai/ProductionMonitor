@@ -5,8 +5,11 @@ import { StatusBadge } from "./StatusBadge";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Unplug } from "lucide-react";
+import type { AppMode } from "@/lib/settings";
+import { deriveLineVisualState, type LineVisualVariant } from "@/lib/line-visual-state";
 
 interface LineCardProps {
+  mode: AppMode;
   line: {
     id: string;
     name: string;
@@ -24,7 +27,26 @@ interface LineCardProps {
 // Chroni przed "gateway-down" pokazującym stare wartości jako żywe.
 const STALE_THRESHOLD_MS = 30_000;
 
-export function LineCard({ line }: LineCardProps) {
+// Akcent kafelka — wspólny dla obu trybów. Pochodzi z wariantu wizualnego,
+// żeby PLAN_MODE i NO_PLAN_MODE mapowały na te same klasy Tailwind.
+type Accent = 'green' | 'alarm' | 'neutral' | 'offline';
+
+function accentForVariant(variant: LineVisualVariant): Accent {
+  switch (variant) {
+    case 'offline':
+      return 'offline';
+    case 'plan-working':
+    case 'no-plan-running':
+      return 'green';
+    case 'plan-alarm':
+      return 'alarm';
+    case 'plan-idle':
+    case 'no-plan-stopped':
+      return 'neutral';
+  }
+}
+
+export function LineCard({ line, mode }: LineCardProps) {
   const latest = line.history[0];
   const currentStatus = latest?.status;
   const currentSpeed = latest?.speed || 0;
@@ -50,8 +72,27 @@ export function LineCard({ line }: LineCardProps) {
 
   const isOffline = !line.isOnline || isStale;
 
-  const isWorkingAsPlanned = hasActivePlan && currentStatus === true && !isOffline;
-  const isAlarmState = hasActivePlan && currentStatus === false && !isOffline;
+  const { variant } = deriveLineVisualState({
+    mode,
+    isOffline,
+    hasActivePlan,
+    status: currentStatus,
+    speed: currentSpeed,
+  });
+  const accent = accentForVariant(variant);
+
+  const isNoPlanMode = mode === 'NO_PLAN_MODE';
+  const isGreen = accent === 'green';
+  const isAlarm = accent === 'alarm';
+
+  // Badge: w PLAN_MODE zachowujemy dokładnie poprzednie zachowanie (status z PLC).
+  // W NO_PLAN_MODE badge zgodny z kafelkiem: zielony gdy pracuje, szary (Postój)
+  // w przeciwnym razie — bez czerwonej kropki, bo to nie alarm planu.
+  const badgeStatus = isOffline
+    ? undefined
+    : isNoPlanMode
+      ? (isGreen ? true : undefined)
+      : currentStatus;
 
   return (
     // h-full + min-w-0: kafelek wypełnia komórkę siatki (auto-rows-fr) i może się
@@ -60,17 +101,17 @@ export function LineCard({ line }: LineCardProps) {
       <div className={cn(
         "relative bg-white border rounded-2xl transition-all duration-500 overflow-hidden h-full flex flex-col",
         "group-hover:shadow-[0_25px_50px_rgb(0,0,0,0.06)] group-hover:-translate-y-1",
-        isWorkingAsPlanned && "border-emerald-100",
-        isAlarmState && "border-rose-200 animate-pulse-subtle",
-        isOffline && "border-slate-200 bg-slate-50/30",
-        !hasActivePlan && !isOffline && "border-slate-100 shadow-sm"
+        accent === 'green' && "border-emerald-100",
+        accent === 'alarm' && "border-rose-200 animate-pulse-subtle",
+        accent === 'offline' && "border-slate-200 bg-slate-50/30",
+        accent === 'neutral' && "border-slate-100 shadow-sm"
       )}>
         {/* Pionowy pasek statusu */}
         <div className={cn(
           "absolute left-0 top-0 bottom-0 w-2 2xl:w-2.5 transition-all duration-500",
-          isWorkingAsPlanned ? "bg-emerald-500 shadow-[2px_0_15px_rgba(16,185,129,0.2)]" :
-          isAlarmState ? "bg-rose-500 shadow-[2px_0_20px_rgba(225,29,72,0.3)]" :
-          isOffline ? "bg-slate-300" :
+          accent === 'green' ? "bg-emerald-500 shadow-[2px_0_15px_rgba(16,185,129,0.2)]" :
+          accent === 'alarm' ? "bg-rose-500 shadow-[2px_0_20px_rgba(225,29,72,0.3)]" :
+          accent === 'offline' ? "bg-slate-300" :
           "bg-slate-100"
         )} />
 
@@ -91,7 +132,7 @@ export function LineCard({ line }: LineCardProps) {
                 </div>
               )}
             </div>
-            <StatusBadge status={isOffline ? undefined : currentStatus} />
+            <StatusBadge status={badgeStatus} />
           </div>
 
           {/* Metryki — wyśrodkowane w dostępnej przestrzeni */}
@@ -102,7 +143,7 @@ export function LineCard({ line }: LineCardProps) {
                 <div className="flex items-baseline gap-1.5 min-w-0">
                   <span className={cn(
                     "text-4xl 2xl:text-5xl font-black font-mono tracking-tighter tabular-nums leading-none truncate",
-                    isAlarmState ? "text-rose-600" : "text-slate-900",
+                    isAlarm ? "text-rose-600" : "text-slate-900",
                     isOffline && "text-slate-400"
                   )}>
                     {isOffline ? "---" : currentSpeed.toFixed(1)}
@@ -127,20 +168,40 @@ export function LineCard({ line }: LineCardProps) {
           </div>
         </div>
 
-        {/* Dolna sekcja z Indeksem */}
-        <div className={cn(
-          "shrink-0 px-7 2xl:px-10 py-3 2xl:py-4 border-t transition-colors",
-          hasActivePlan ? (isOffline ? "bg-slate-400 border-slate-400" : "bg-slate-900 border-slate-900") : "bg-slate-50 border-slate-50"
-        )}>
-          {hasActivePlan ? (
-            <div className="flex justify-between items-center gap-3">
-              <span className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] shrink-0">Aktualny Indeks</span>
-              <span className="text-sm font-black text-white uppercase tracking-widest truncate">{activePlan.productIndex}</span>
-            </div>
-          ) : (
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Brak aktywnego zlecenia</span>
-          )}
-        </div>
+        {/* Dolna sekcja.
+            NO_PLAN_MODE: etykieta statusu (Linia pracuje / Postój / Brak połączenia).
+            PLAN_MODE: aktualny indeks zlecenia — DOKŁADNIE jak dotychczas. */}
+        {isNoPlanMode ? (
+          <div className={cn(
+            "shrink-0 px-7 2xl:px-10 py-3 2xl:py-4 border-t transition-colors",
+            isOffline ? "bg-slate-400 border-slate-400" :
+            isGreen ? "bg-emerald-600 border-emerald-600" :
+            "bg-slate-200 border-slate-200"
+          )}>
+            <span className={cn(
+              "text-sm font-black uppercase tracking-widest",
+              isOffline ? "text-white/80" :
+              isGreen ? "text-white" :
+              "text-slate-600"
+            )}>
+              {isOffline ? "Brak połączenia" : isGreen ? "Linia pracuje" : "Postój"}
+            </span>
+          </div>
+        ) : (
+          <div className={cn(
+            "shrink-0 px-7 2xl:px-10 py-3 2xl:py-4 border-t transition-colors",
+            hasActivePlan ? (isOffline ? "bg-slate-400 border-slate-400" : "bg-slate-900 border-slate-900") : "bg-slate-50 border-slate-50"
+          )}>
+            {hasActivePlan ? (
+              <div className="flex justify-between items-center gap-3">
+                <span className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] shrink-0">Aktualny Indeks</span>
+                <span className="text-sm font-black text-white uppercase tracking-widest truncate">{activePlan.productIndex}</span>
+              </div>
+            ) : (
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Brak aktywnego zlecenia</span>
+            )}
+          </div>
+        )}
       </div>
     </Link>
   );
