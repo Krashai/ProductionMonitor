@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, SlidersHorizontal, LayoutGrid } from 'lucide-react';
+import { ArrowLeft, SlidersHorizontal } from 'lucide-react';
 import { getAppMode } from '@/lib/settings';
 import { ConfigForm } from '@/components/ConfigForm';
 
@@ -28,26 +28,16 @@ export default async function ConfigPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 shrink-0 mt-2">
-            <Link
-              href="/overview"
-              className="inline-flex items-center gap-2 text-xs font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest transition-colors group"
-            >
-              <LayoutGrid size={14} />
-              Przegląd
-            </Link>
-
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 text-xs font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest transition-colors group"
-            >
-              <ArrowLeft
-                size={14}
-                className="group-hover:-translate-x-1 transition-transform"
-              />
-              Monitor
-            </Link>
-          </div>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-xs font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest transition-colors group shrink-0 mt-2"
+          >
+            <ArrowLeft
+              size={14}
+              className="group-hover:-translate-x-1 transition-transform"
+            />
+            Monitor
+          </Link>
         </div>
 
         <ConfigForm initialMode={mode} />
