@@ -33,6 +33,7 @@ export const getHallsWithLines = unstable_cache(
     const halls = await prisma.hall.findMany({
       include: {
         lines: {
+          orderBy: { name: 'asc' },
           include: {
             history: {
               orderBy: [
