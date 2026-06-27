@@ -1,10 +1,12 @@
 'use client';
 
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { BarChart3, CalendarPlus, Tv2, SlidersHorizontal } from 'lucide-react';
 import { ConnectionStatus } from './ConnectionStatus';
 import { OverviewLineCard } from './OverviewLineCard';
 import { useRealtimeUpdates } from '@/hooks/useRealtime';
+import { useHallGridRows } from '@/hooks/useHallGridRows';
 import type { AppMode } from '@/lib/settings';
 import type { OverviewLine } from './OverviewLineCard';
 
@@ -21,6 +23,8 @@ interface Props {
 
 export function OverviewDashboard({ halls, mode }: Props) {
   const { status: realtimeStatus, lastEventAt } = useRealtimeUpdates();
+  const lineCounts = useMemo(() => halls.map(h => h.lines.length), [halls]);
+  const { outerRef, templateRows } = useHallGridRows(lineCounts);
 
   if (!halls?.length) {
     return (
@@ -79,12 +83,13 @@ export function OverviewDashboard({ halls, mode }: Props) {
         </div>
       </header>
 
-      {/* Sekcje hal — CSS grid z gridTemplateRows proporcjonalnym do liczby linii.
-          Hala z 9 liniami dostaje więcej miejsca niż hala z 7 liniami, dzięki
-          czemu karty mają zbliżoną wysokość niezależnie od liczby rzędów w hali. */}
+      {/* Sekcje hal — gridTemplateRows obliczone dynamicznie przez useHallGridRows:
+          liczba fr = liczba rzeczywistych rzędów CSS grid w danej hali, dzięki czemu
+          wysokość jednego rzędu kart jest identyczna we wszystkich halach. */}
       <div
+        ref={outerRef}
         className='flex-1 min-h-0 grid gap-3 2xl:gap-4'
-        style={{ gridTemplateRows: halls.map(h => `${h.lines.length}fr`).join(' ') }}
+        style={{ gridTemplateRows: templateRows }}
       >
         {halls.map((hall) => (
           <section key={hall.id} className='min-h-0 overflow-hidden flex flex-col gap-1.5 2xl:gap-2'>
@@ -99,9 +104,10 @@ export function OverviewDashboard({ halls, mode }: Props) {
               </span>
             </div>
 
-            {/* Siatka — auto-rows-[1fr] sprawia że wiersze mają równą wysokość
-                i razem wypełniają przestrzeń sekcji */}
-            <div className='flex-1 min-h-0 grid auto-rows-[minmax(0,1fr)] gap-2 2xl:gap-2.5 grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(12rem,1fr))]'>
+            <div
+              data-hall-grid
+              className='flex-1 min-h-0 grid auto-rows-[minmax(0,1fr)] gap-2 2xl:gap-2.5 grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(12rem,1fr))]'
+            >
               {hall.lines.map((line) => (
                 <OverviewLineCard key={line.id} line={line} mode={mode} />
               ))}
