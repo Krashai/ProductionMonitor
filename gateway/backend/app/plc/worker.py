@@ -15,6 +15,7 @@ from app.db.models import Line, MachineStatusHistory, ScrapEvent
 
 NOTIFY_TOKEN = os.getenv("NOTIFY_TOKEN")
 NOTIFY_URL = "http://dashboard-app:3000/api/notify"
+SPEED_MAX_SILENCE_S = 60  # max przerwa między zapisami prędkości, niezależnie od deadband
 
 # Fire-and-forget pool dla notify: HTTP POST nie może blokować pętli PLC.
 # Wcześniej synchroniczny request z timeout=0.5s mógł zatrzymać poll na 2-4s
@@ -77,6 +78,7 @@ class PLCWorker(threading.Thread):
         # Throttle dla touch_last_seen — heartbeat zapisujemy max raz na 10s,
         # żeby nie spamować bazą przy poll_rate=1s.
         self._last_seen_written_at = 0.0
+        self._last_speed_written_at: float = 0.0
 
     def connect(self):
         """Próba połączenia ze sterownikiem PLC."""
@@ -255,8 +257,10 @@ class PLCWorker(threading.Thread):
             if new_speed is not None:
                 if old_speed is None:
                     speed_changed = True
-                else:
-                    speed_changed = abs(new_speed - old_speed) >= 0.5
+                elif abs(new_speed - old_speed) >= 0.5:
+                    speed_changed = True
+                elif time.time() - self._last_speed_written_at > SPEED_MAX_SILENCE_S:
+                    speed_changed = True  # periodic flush — zapobiega "zamrożeniu" prędkości w DB
 
             if status_changed or speed_changed:
                 final_status = new_status if new_status is not None else (old_status or False)
@@ -276,6 +280,8 @@ class PLCWorker(threading.Thread):
                 
                 self.last_values['status_cache'] = final_status
                 self.last_values['speed_cache'] = final_speed
+                if speed_changed:
+                    self._last_speed_written_at = time.time()
 
             # 2. Obsługa Scrap (Edge Detection)
             scrap_added = False

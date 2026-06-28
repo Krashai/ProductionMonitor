@@ -271,6 +271,9 @@ async def update_plc(plc_id: str, config: PLCConfig, current_user: User = Depend
         target = next((w for w in workers if w.config.id == plc_id), None)
         if target:
             target.stop()
+            target.join(timeout=6.0)
+            if target.is_alive():
+                print(f"Worker {target.config.id} did not stop within 6s timeout", flush=True)
             workers = [w for w in workers if w.config.id != plc_id]
         
         loop = asyncio.get_event_loop()
@@ -300,6 +303,9 @@ async def delete_plc(plc_id: str, current_user: User = Depends(get_current_user)
         target = next((w for w in workers if w.config.id == plc_id), None)
         if target:
             target.stop()
+            target.join(timeout=6.0)
+            if target.is_alive():
+                print(f"Worker {target.config.id} did not stop within 6s timeout", flush=True)
             workers = [w for w in workers if w.config.id != plc_id]
         
         # 2. Usuń historię i linię
