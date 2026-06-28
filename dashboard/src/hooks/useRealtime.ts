@@ -59,12 +59,17 @@ export function useRealtimeUpdates(): UseRealtimeResult {
 
     const scheduleRefresh = () => {
       const now = Date.now()
+      const isNewCycle = !debounceTimerRef.current
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
-      const timeSinceLast = now - lastScheduledRef.current
-      const delay = timeSinceLast > MAX_DEBOUNCE_WAIT_MS ? 0 : DEBOUNCE_MS
-      lastScheduledRef.current = now
+      // lastScheduledRef zapisuje czas POCZĄTKU cyklu debounce (nie każdego wywołania).
+      // Dzięki temu timeSinceCycleStart rośnie przez czas trwania bursta eventów,
+      // a po przekroczeniu MAX_DEBOUNCE_WAIT_MS refresh odpala natychmiast.
+      if (isNewCycle) lastScheduledRef.current = now
+      const timeSinceCycleStart = now - lastScheduledRef.current
+      const delay = timeSinceCycleStart > MAX_DEBOUNCE_WAIT_MS ? 0 : DEBOUNCE_MS
       debounceTimerRef.current = setTimeout(() => {
         debounceTimerRef.current = null
+        lastScheduledRef.current = 0
         routerRef.current.refresh()
       }, delay)
     }
