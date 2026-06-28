@@ -6,6 +6,13 @@ const globalForEvents = global as unknown as {
 };
 
 // Singleton EventEmittera, który przetrwa odświeżanie kodu w trybie dev
+/**
+ * WAŻNE: Ten EventEmitter działa tylko w środowisku single-process Node.js.
+ * W trybie multi-process (PM2 cluster, multiple Docker replicas) każdy proces
+ * ma własną instancję — POST /api/notify i GET /api/events mogą trafić do
+ * różnych procesów, co sprawi że eventy nie dotrą do klientów SSE.
+ * Deployment tego serwera MUSI być single-process (jeden worker Node.js).
+ */
 export const eventEmitter = globalForEvents.eventEmitter || new EventEmitter();
 
 if (process.env.NODE_ENV !== 'production') {

@@ -11,7 +11,7 @@ class Hall(Base):
 
     id = Column(String, primary_key=True, default=generate_cuid)
     name = Column(String, unique=True, nullable=False)
-    createdAt = Column("createdAt", DateTime, server_default=func.now(), nullable=False)
+    createdAt = Column("createdAt", DateTime, default=func.now(), server_default=func.now(), nullable=False)
     updatedAt = Column("updatedAt", DateTime, default=func.now(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 class Line(Base):
@@ -46,14 +46,14 @@ class ProductionPlan(Base):
     startTime = Column("startTime", DateTime, nullable=False)
     endTime = Column("endTime", DateTime, nullable=False)
     plannedSpeed = Column("plannedSpeed", Float, nullable=False)
-    createdAt = Column("createdAt", DateTime, server_default=func.now(), nullable=False)
+    createdAt = Column("createdAt", DateTime, default=func.now(), server_default=func.now(), nullable=False)
     updatedAt = Column("updatedAt", DateTime, default=func.now(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 class MachineStatusHistory(Base):
     __tablename__ = "machine_status_history"
 
     id = Column(String, default=generate_cuid, primary_key=True)
-    time = Column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    time = Column(DateTime(timezone=True), primary_key=True, default=func.now(), server_default=func.now())
     lineId = Column("lineId", String, ForeignKey("lines.id"), nullable=False)
     status = Column(Boolean, nullable=False)
     speed = Column(Float, nullable=False)
@@ -62,7 +62,7 @@ class ScrapEvent(Base):
     __tablename__ = "scrap_events"
 
     id = Column(String, default=generate_cuid, primary_key=True)
-    time = Column(DateTime(timezone=True), primary_key=True, server_default=func.now())
+    time = Column(DateTime(timezone=True), primary_key=True, default=func.now(), server_default=func.now())
     lineId = Column("lineId", String, ForeignKey("lines.id"), nullable=False)
 
 class DowntimeComment(Base):
@@ -73,5 +73,5 @@ class DowntimeComment(Base):
     startTime = Column("startTime", DateTime, nullable=False)
     endTime = Column("endTime", DateTime, nullable=False)
     comment = Column(Text, nullable=False)
-    createdAt = Column("createdAt", DateTime, server_default=func.now(), nullable=False)
+    createdAt = Column("createdAt", DateTime, default=func.now(), server_default=func.now(), nullable=False)
     updatedAt = Column("updatedAt", DateTime, default=func.now(), server_default=func.now(), onupdate=func.now(), nullable=False)

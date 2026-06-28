@@ -1,7 +1,8 @@
 'use server'
 
 import { prisma } from '@/lib/prisma';
-import { revalidatePath, unstable_cache } from 'next/cache';
+import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache';
+import { emitRealtimeEvent } from '@/lib/events';
 import { format } from 'date-fns';
 import {
   computeLineReport,
@@ -116,6 +117,8 @@ export async function addProductionPlan(data: {
     });
     revalidatePath('/');
     revalidatePath('/planning');
+    revalidateTag('halls-data');
+    emitRealtimeEvent({ type: 'PLAN_UPDATE', timestamp: new Date().toISOString() });
     return { success: true, plan };
   } catch (error) {
     console.error('Error adding production plan:', error);
@@ -169,6 +172,8 @@ export async function updateProductionPlan(id: string, data: {
     revalidatePath('/');
     revalidatePath('/planning');
     revalidatePath(`/line/${updated.lineId}`);
+    revalidateTag('halls-data');
+    emitRealtimeEvent({ type: 'PLAN_UPDATE', timestamp: new Date().toISOString() });
     return { success: true, plan: updated };
   } catch (error) {
     console.error('Error updating production plan:', error);
@@ -189,6 +194,8 @@ export async function deleteProductionPlan(id: string) {
     revalidatePath('/');
     revalidatePath('/planning');
     revalidatePath(`/line/${deleted.lineId}`);
+    revalidateTag('halls-data');
+    emitRealtimeEvent({ type: 'PLAN_UPDATE', timestamp: new Date().toISOString() });
     return { success: true };
   } catch (error) {
     console.error('Error deleting production plan:', error);

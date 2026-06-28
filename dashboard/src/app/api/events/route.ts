@@ -22,12 +22,16 @@ export async function GET(req: NextRequest) {
   const encoder = new TextEncoder()
 
   let heartbeat: ReturnType<typeof setInterval> | null = null
+  let writeWatchdog: ReturnType<typeof setInterval> | null = null
   let onDataUpdate: ((event: RealtimeEvent) => void) | null = null
 
   const stream = new ReadableStream({
     start(controller) {
+      let lastWriteMs = Date.now()
+
       const safeEnqueue = (chunk: string) => {
         try {
+          lastWriteMs = Date.now()
           controller.enqueue(encoder.encode(chunk))
         } catch {
           cleanup()
@@ -46,6 +50,10 @@ export async function GET(req: NextRequest) {
         if (heartbeat) {
           clearInterval(heartbeat)
           heartbeat = null
+        }
+        if (writeWatchdog) {
+          clearInterval(writeWatchdog)
+          writeWatchdog = null
         }
         if (onDataUpdate) {
           eventEmitter.off('data-update', onDataUpdate)
@@ -67,6 +75,14 @@ export async function GET(req: NextRequest) {
       // który trzyma połączenie otwarte bez wyzwalania onmessage.
       heartbeat = setInterval(() => {
         safeEnqueue(`: ping ${Date.now()}\n\n`)
+      }, HEARTBEAT_INTERVAL_MS)
+
+      // Write watchdog: wykrywa zombie connections przy NAT timeout / awarii
+      // sieci bez TCP RST, gdy req.signal.abort nigdy nie odpali.
+      writeWatchdog = setInterval(() => {
+        if (Date.now() - lastWriteMs > HEARTBEAT_INTERVAL_MS * 2) {
+          cleanup()
+        }
       }, HEARTBEAT_INTERVAL_MS)
 
       req.signal.addEventListener('abort', cleanup)
