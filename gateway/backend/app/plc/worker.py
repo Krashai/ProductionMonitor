@@ -280,7 +280,9 @@ class PLCWorker(threading.Thread):
                 
                 self.last_values['status_cache'] = final_status
                 self.last_values['speed_cache'] = final_speed
-                if speed_changed:
+                # Aktualizuj timer ilekroć prędkość faktycznie trafia do DB —
+                # niezależnie czy wymusiło to speed_changed czy status_changed.
+                if new_speed is not None:
                     self._last_speed_written_at = time.time()
 
             # 2. Obsługa Scrap (Edge Detection)
