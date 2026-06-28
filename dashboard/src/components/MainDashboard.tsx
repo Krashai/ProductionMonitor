@@ -5,7 +5,6 @@ import { LineCard } from "./LineCard";
 import { Play, Pause, CalendarPlus, BarChart3, SlidersHorizontal, LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { useRouter } from 'next/navigation';
 import { useRealtimeUpdates } from "@/hooks/useRealtime";
 import { ConnectionStatus } from "./ConnectionStatus";
 import type { AppMode } from "@/lib/settings";
@@ -36,7 +35,6 @@ export function MainDashboard({ halls, mode }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [progress, setProgress] = useState(0);
-  const router = useRouter();
 
   // Aktywujemy subskrypcję zdarzeń Real-time (zamiast pollowania)
   const { status: realtimeStatus, lastEventAt } = useRealtimeUpdates();

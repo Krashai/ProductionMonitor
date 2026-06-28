@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 export type RealtimeStatus = 'connecting' | 'connected' | 'disconnected'
@@ -14,21 +14,26 @@ interface UseRealtimeResult {
 }
 
 const DEBOUNCE_MS = 500
+const MAX_DEBOUNCE_WAIT_MS = 2000
 const INITIAL_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 30000
 // Fallback polling: safety net gdyby SSE wyglądał na żywy ale nie dostarczał eventów.
-const FALLBACK_POLL_MS = 60000
+const FALLBACK_POLL_MS = 15000
 
 /**
  * Subskrybuje strumień SSE z /api/events.
  *
  * Niezawodność:
  * - Automatyczny reconnect z exponential backoff (1s → 30s).
- * - Trailing-edge debounce zamiast leading throttle.
+ * - Trailing-edge debounce z maxWait(2s) — ciągły stream eventów nie blokuje
+ *   router.refresh() bezterminowo.
  * - Po każdym (re)connect router.refresh() — reconciliacja danych.
  * - visibilitychange + online: wymuś reconnect+refresh gdy karta wraca z tła
  *   (resume PC, switch tab, sieć wraca). Bez tego browser może trzymać "OPEN"
  *   socket bez dostawy eventów i operator widzi stale.
+ * - useEffect ma puste deps [] — routerRef trzyma aktualną referencję do routera
+ *   bez restartu effectu (i zamykania/otwierania SSE) przy każdej zmianie
+ *   referencji routera po router.refresh().
  */
 export function useRealtimeUpdates(): UseRealtimeResult {
   const router = useRouter()
@@ -41,17 +46,28 @@ export function useRealtimeUpdates(): UseRealtimeResult {
   const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const backoffRef = useRef(INITIAL_BACKOFF_MS)
   const isMountedRef = useRef(true)
+  const routerRef = useRef(router)
+  const lastScheduledRef = useRef<number>(0)
 
-  const scheduleRefresh = useCallback(() => {
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
-    debounceTimerRef.current = setTimeout(() => {
-      debounceTimerRef.current = null
-      router.refresh()
-    }, DEBOUNCE_MS)
-  }, [router])
+  // Aktualizuj routerRef przy każdym renderze bez restartu głównego effectu
+  useEffect(() => {
+    routerRef.current = router
+  })
 
   useEffect(() => {
     isMountedRef.current = true
+
+    const scheduleRefresh = () => {
+      const now = Date.now()
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+      const timeSinceLast = now - lastScheduledRef.current
+      const delay = timeSinceLast > MAX_DEBOUNCE_WAIT_MS ? 0 : DEBOUNCE_MS
+      lastScheduledRef.current = now
+      debounceTimerRef.current = setTimeout(() => {
+        debounceTimerRef.current = null
+        routerRef.current.refresh()
+      }, delay)
+    }
 
     const connect = () => {
       if (!isMountedRef.current) return
@@ -122,7 +138,7 @@ export function useRealtimeUpdates(): UseRealtimeResult {
 
     fallbackPollRef.current = setInterval(() => {
       if (!isMountedRef.current) return
-      router.refresh()
+      routerRef.current.refresh()
     }, FALLBACK_POLL_MS)
 
     connect()
@@ -139,7 +155,7 @@ export function useRealtimeUpdates(): UseRealtimeResult {
         esRef.current = null
       }
     }
-  }, [scheduleRefresh, router])
+  }, [])
 
   return { status, lastEventAt }
 }
