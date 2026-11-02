@@ -13,6 +13,7 @@
  */
 
 import type { AppMode } from '@/lib/settings';
+import { MIN_DISPLAY_SPEED } from '@/lib/speed';
 
 export type LineVisualVariant =
   | 'offline'
@@ -45,7 +46,9 @@ export function deriveLineVisualState(
   if (isOffline) return { variant: 'offline' };
 
   if (mode === 'NO_PLAN_MODE') {
-    const isRunning = status === true && speed > 0;
+    // Spójnie z progiem wyświetlania: poniżej MIN_DISPLAY_SPEED pokazujemy 0.0,
+    // więc kafelek nie może być wtedy zielony (NaN też daje false).
+    const isRunning = status === true && speed >= MIN_DISPLAY_SPEED;
     return { variant: isRunning ? 'no-plan-running' : 'no-plan-stopped' };
   }
 

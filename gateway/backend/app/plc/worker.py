@@ -241,7 +241,9 @@ class PLCWorker(threading.Thread):
             _speed_raw = current_cycle.get('Speed')
             new_speed = _speed_raw if _speed_raw is not None else current_cycle.get('speed')
             if new_speed is not None:
-                new_speed = float(new_speed)
+                # Prędkość nie może być ujemna — szum czujnika obcinamy do 0.0 przed
+                # deadbandem i zapisem do bazy (próg wyświetlania <1 to reguła dashboardu).
+                new_speed = max(0.0, float(new_speed))
 
             # Pobieramy poprzednie wartości z cache
             old_status = self.last_values.get('status_cache')

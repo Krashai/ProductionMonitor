@@ -56,11 +56,31 @@ describe('deriveLineVisualState', () => {
     ).toBe('plan-idle');
   });
 
-  test('NO_PLAN_MODE: PRACA && speed>0 => no-plan-running', () => {
+  test('NO_PLAN_MODE: PRACA && speed>=1 => no-plan-running', () => {
     const state = deriveLineVisualState(
-      params({ mode: 'NO_PLAN_MODE', status: true, speed: 0.5 })
+      params({ mode: 'NO_PLAN_MODE', status: true, speed: 1 })
     );
     expect(state.variant).toBe('no-plan-running');
+  });
+
+  // Próg wyświetlania: poniżej 1 m/min prędkość jest pokazywana jako 0,
+  // więc kafelek nie może być zielony przy wyświetlanym 0.0.
+  test('NO_PLAN_MODE: PRACA && 0 < speed < 1 => no-plan-stopped', () => {
+    expect(
+      deriveLineVisualState(params({ mode: 'NO_PLAN_MODE', status: true, speed: 0.5 })).variant
+    ).toBe('no-plan-stopped');
+    expect(
+      deriveLineVisualState(params({ mode: 'NO_PLAN_MODE', status: true, speed: 0.99 })).variant
+    ).toBe('no-plan-stopped');
+  });
+
+  test('NO_PLAN_MODE: PRACA && speed ujemna lub NaN => no-plan-stopped', () => {
+    expect(
+      deriveLineVisualState(params({ mode: 'NO_PLAN_MODE', status: true, speed: -0.1 })).variant
+    ).toBe('no-plan-stopped');
+    expect(
+      deriveLineVisualState(params({ mode: 'NO_PLAN_MODE', status: true, speed: NaN })).variant
+    ).toBe('no-plan-stopped');
   });
 
   test('NO_PLAN_MODE: status=false => no-plan-stopped', () => {

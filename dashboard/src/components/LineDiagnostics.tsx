@@ -9,6 +9,7 @@ import { X, Send, AlertCircle, MousePointer2, MessageSquareText, PencilLine, Plu
 import { KPICard } from './KPICard';
 import { useRealtimeUpdates } from '@/hooks/useRealtime';
 import { ConnectionStatus } from './ConnectionStatus';
+import { displaySpeed } from '@/lib/speed';
 
 type HistoryEntry = { time: string | Date; status: boolean; speed: number | string | null; _time: number };
 type Segment = { start: Date; end: Date; type: 'running' | 'downtime' };
@@ -111,7 +112,8 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
 
       const anchorIdx = findAnchorIndex(sortedHistory, rangeStart);
       let currentStatus: boolean = anchorIdx >= 0 ? sortedHistory[anchorIdx].status === true : false;
-      let currentSpeed: number = anchorIdx >= 0 ? Number(sortedHistory[anchorIdx].speed) || 0 : 0;
+      // displaySpeed: ujemny szum i <1 m/min liczą się jako 0, więc nie wchodzą w czas pracy.
+      let currentSpeed: number = anchorIdx >= 0 ? displaySpeed(sortedHistory[anchorIdx].speed) : 0;
       let cursor = rangeStart;
 
       const accumulate = (startMs: number, endMs: number, status: boolean, speed: number) => {
@@ -130,7 +132,7 @@ export function LineDiagnostics({ lineId, initialPlans, initialHistory, initialC
         if (h._time >= rangeEnd) break;
         accumulate(cursor, h._time, currentStatus, currentSpeed);
         currentStatus = h.status === true;
-        currentSpeed = Number(h.speed) || 0;
+        currentSpeed = displaySpeed(h.speed);
         cursor = h._time;
       }
       accumulate(cursor, rangeEnd, currentStatus, currentSpeed);

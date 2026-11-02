@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Unplug } from "lucide-react";
 import type { AppMode } from "@/lib/settings";
 import { deriveLineVisualState, type LineVisualVariant } from "@/lib/line-visual-state";
+import { displaySpeed } from "@/lib/speed";
 
 interface LineCardProps {
   mode: AppMode;
@@ -49,7 +50,9 @@ function accentForVariant(variant: LineVisualVariant): Accent {
 export function LineCard({ line, mode }: LineCardProps) {
   const latest = line.history[0];
   const currentStatus = latest?.status;
-  const currentSpeed = latest?.speed || 0;
+  // Jedna znormalizowana wartość (ujemne i <1 m/min => 0) do wyświetlenia
+  // oraz do wariantu kafelka — kafelek nie jest zielony przy pokazywanym 0.0.
+  const currentSpeed = displaySpeed(latest?.speed);
   const scrapCount = line._count.scrap;
   const activePlan = line.plans[0];
   const hasActivePlan = !!activePlan;

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { deriveLineVisualState } from '@/lib/line-visual-state';
 import { accentForVariant } from '@/lib/line-accent';
+import { displaySpeed } from '@/lib/speed';
 import { useLineStaleness } from '@/hooks/useLineStaleness';
 import type { AppMode } from '@/lib/settings';
 
@@ -26,7 +27,9 @@ interface OverviewLineCardProps {
 export function OverviewLineCard({ line, mode }: OverviewLineCardProps) {
   const latest = line.history[0];
   const currentStatus = latest?.status;
-  const currentSpeed = latest?.speed ?? 0;
+  // Jedna znormalizowana wartość (ujemne i <1 m/min => 0) do wyświetlenia
+  // oraz do wariantu kafelka — kafelek nie jest zielony przy pokazywanym 0.0.
+  const currentSpeed = displaySpeed(latest?.speed);
   const activePlan = line.plans[0];
   const hasActivePlan = !!activePlan;
 
