@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter } from 'next/navigation';
 import { useRealtimeUpdates } from "@/hooks/useRealtime";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { Logo } from "@/components/brand/Logo";
 import type { AppMode } from "@/lib/settings";
 
 interface Line {
@@ -78,6 +79,11 @@ export function MainDashboard({ halls, mode }: Props) {
       {/* MINIMALISTYCZNY NAVBAR — w trybie kiosk strona się nie przewija, więc shrink-0 */}
       <header className="shrink-0 flex items-center justify-between mb-4 2xl:mb-6 pb-4 border-b border-slate-100">
         <div className="flex items-center gap-8">
+          {/* Logo LineON — wysokość (28px na 2xl) mniejsza od przycisku Play
+           * (h-10 = 40px), więc nie zwiększa wysokości nagłówka kiosku.
+           * `wink` tylko na widokach kiosku (easter egg). */}
+          <Logo wink className="h-5 xl:h-6 2xl:h-7" />
+
           {/* Play/Pause */}
           <button 
             onClick={() => {

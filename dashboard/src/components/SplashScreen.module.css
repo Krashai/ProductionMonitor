@@ -1,0 +1,142 @@
+/*
+ * Splash screen "Walk to the red".
+ *
+ * Kierunek: industrial minimalism — biała plansza, atramentowy napis w stylu nagłówków
+ * dashboardu (font-black / uppercase / tracking-tighter), jeden czerwony pas światła
+ * przesuwający się przez litery i zostawiający rozświetlone słowo "red".
+ *
+ * Oś czasu (całość ~2,35 s):
+ *   0,00–0,50 s  napis wsuwa się i rozjaśnia (rise)
+ *   0,30–1,60 s  czerwony pas przechodzi od lewej do prawej (sweep; w kadrze ok. 0,6–1,4 s)
+ *   0,97–1,42 s  słowo "red" zapala się na stałe wraz z poświatą (redLit)
+ *   1,90–2,35 s  cała nakładka zanika (splashOut)
+ *
+ * Wszystko jest czystym CSS-em, więc animacja rusza od pierwszego malowania —
+ * jeszcze przed hydratacją Reacta.
+ */
+
+.splash {
+  --splash-ink: #14171c;
+  --splash-red: #e5322d;
+  --splash-red-deep: #a81d19;
+  --splash-red-hot: #ff6a5c;
+
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #fff;
+  /* Nakładka nigdy nie przechwytuje kliknięć — kiosk i użytkownik mają działać od razu */
+  pointer-events: none;
+  animation: splashOut 0.45s ease-in 1.9s forwards;
+}
+
+.slogan {
+  margin: 0;
+  /* Zapas na ujemny letter-spacing i overshoot liter — background-clip: text
+     nie maluje poza polem tła, więc bez paddingu ostatnia litera byłaby ucięta */
+  padding: 0.06em 0.12em;
+  font-family: inherit;
+  font-size: clamp(1.75rem, 7.5vw, 20rem);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--splash-ink);
+
+  /* Tło 2,6x szersze od napisu: atrament | miękki czerwony pas (ciemny brzeg, jasny rdzeń) | atrament.
+     Środek pasa wjeżdża na -0,3 szer. napisu i wyjeżdża na 1,3 — poza kadr po obu stronach */
+  background-image: linear-gradient(
+    100deg,
+    var(--splash-ink) 0%,
+    var(--splash-ink) 39.6%,
+    var(--splash-red-deep) 44.2%,
+    var(--splash-red) 48.3%,
+    var(--splash-red-hot) 50%,
+    var(--splash-red) 51.7%,
+    var(--splash-red-deep) 55.8%,
+    var(--splash-ink) 60.4%,
+    var(--splash-ink) 100%
+  );
+  background-size: 260% 100%;
+  background-repeat: no-repeat;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+
+  animation:
+    rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both,
+    sweep 1.3s cubic-bezier(0.42, 0, 0.58, 1) 0.3s both;
+}
+
+/* Słowo "red": w trakcie przejścia pasa zapala się na stałe, zanim pas je opuści */
+.red {
+  color: var(--splash-red);
+  -webkit-text-fill-color: currentcolor;
+  animation: redLit 0.45s ease-out 0.97s both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.14em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Pozycja tła 100% → 0%: pas wjeżdża z lewej strony napisu i wyjeżdża po prawej */
+@keyframes sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+/* Wypełnienie liter od przezroczystego (widać pas) do stałej czerwieni — bez mignięcia atramentu */
+@keyframes redLit {
+  from {
+    -webkit-text-fill-color: rgba(229, 50, 45, 0);
+    text-shadow: 0 0 0 rgba(229, 50, 45, 0);
+  }
+  55% {
+    -webkit-text-fill-color: rgba(229, 50, 45, 1);
+    text-shadow: 0 0 0.45em rgba(229, 50, 45, 0.5);
+  }
+  to {
+    -webkit-text-fill-color: rgba(229, 50, 45, 1);
+    text-shadow: 0 0 0.3em rgba(229, 50, 45, 0.3);
+  }
+}
+
+@keyframes splashOut {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* Bez ruchu: statyczny napis (słowo "red" od razu czerwone), krótko widoczny i znikający */
+@media (prefers-reduced-motion: reduce) {
+  .splash {
+    animation: splashOut 0.3s ease-out 0.8s forwards;
+  }
+
+  .slogan {
+    background: none;
+    -webkit-text-fill-color: currentcolor;
+    animation: none;
+  }
+
+  .red {
+    animation: none;
+  }
+}

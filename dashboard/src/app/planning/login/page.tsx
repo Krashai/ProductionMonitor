@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowLeft, Lock } from 'lucide-react';
+import { Logo } from '@/components/brand/Logo';
 import { loginPlanning } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,9 @@ export default async function PlanningLoginPage({ searchParams }: PageProps) {
   return (
     <main className="min-h-screen flex items-center justify-center bg-slate-50/30 px-6 py-12">
       <div className="w-full max-w-md">
+        <div className="flex justify-center mb-8">
+          <Logo className="h-7" />
+        </div>
         <div className="bg-white border border-slate-200 rounded-[2.5rem] p-12 shadow-sm text-center">
           <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
             <Lock className="text-blue-600" size={28} />

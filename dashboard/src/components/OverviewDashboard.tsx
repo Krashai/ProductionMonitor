@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import { BarChart3, CalendarPlus, Tv2, SlidersHorizontal } from 'lucide-react';
 import { ConnectionStatus } from './ConnectionStatus';
+import { Logo } from '@/components/brand/Logo';
 import { OverviewLineCard } from './OverviewLineCard';
 import { useRealtimeUpdates } from '@/hooks/useRealtime';
 import { useHallGridRows } from '@/hooks/useHallGridRows';
@@ -38,13 +39,20 @@ export function OverviewDashboard({ halls, mode }: Props) {
     <div className='h-full flex flex-col max-w-[2560px] mx-auto px-6 2xl:px-10 py-4'>
       {/* Nagłówek */}
       <header className='shrink-0 flex items-center justify-between mb-4 2xl:mb-5 pb-3 border-b border-slate-100'>
-        <div className='flex items-baseline gap-3'>
-          <h1 className='text-xl 2xl:text-2xl font-black text-slate-900 tracking-tighter uppercase leading-none'>
-            Przegląd Fabryki
-          </h1>
-          <span className='text-[10px] font-bold text-slate-400 uppercase tracking-widest'>
-            {halls.reduce((acc, h) => acc + h.lines.length, 0)} linii
-          </span>
+        <div className='flex items-center gap-4 2xl:gap-5'>
+          {/* Logo LineON — 28px na 2xl mieści się w wysokości wskaźnika LIVE
+           * (~29px), więc nie zwiększa nagłówka kiosku. `wink` tylko na
+           * widokach kiosku (easter egg). */}
+          <Logo wink className='h-5 xl:h-6 2xl:h-7' />
+          <span className='h-5 w-px bg-slate-200' aria-hidden='true' />
+          <div className='flex items-baseline gap-3'>
+            <h1 className='text-xl 2xl:text-2xl font-black text-slate-900 tracking-tighter uppercase leading-none'>
+              Przegląd Fabryki
+            </h1>
+            <span className='text-[10px] font-bold text-slate-400 uppercase tracking-widest'>
+              {halls.reduce((acc, h) => acc + h.lines.length, 0)} linii
+            </span>
+          </div>
         </div>
 
         <div className='flex items-center gap-8'>

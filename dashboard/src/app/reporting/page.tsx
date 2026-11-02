@@ -25,6 +25,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import Link from "next/link";
+import { Logo } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
 
 type HallReport = ReportingHall;
@@ -74,13 +75,17 @@ export default function ReportingPage() {
     <div className="min-h-screen bg-slate-50/30 pb-20 font-sans text-slate-900 leading-normal tracking-normal">
       {/* NAGŁÓWEK */}
       <header className="max-w-[1600px] mx-auto px-8 pt-12 pb-8 flex flex-col gap-8">
-        <Link 
-          href="/" 
-          className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
-        >
-          <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-          <span className="text-xs font-bold uppercase tracking-widest">Wróć do monitora</span>
-        </Link>
+        <div className="flex items-center gap-6">
+          <Logo className="h-6" />
+          <span className="h-5 w-px bg-slate-200" aria-hidden="true" />
+          <Link
+            href="/"
+            className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
+          >
+            <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
+            <span className="text-xs font-bold uppercase tracking-widest">Wróć do monitora</span>
+          </Link>
+        </div>
 
         <div className="flex items-center justify-between">
           <h1 className="text-4xl font-black tracking-tighter uppercase text-slate-900">

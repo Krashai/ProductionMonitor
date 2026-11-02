@@ -8,6 +8,7 @@ import { PlanningTabs } from "@/components/PlanningTabs";
 import { GanttChart } from "@/components/GanttChart";
 import { ArrowLeft, LogOut } from "lucide-react";
 import Link from "next/link";
+import { Logo } from "@/components/brand/Logo";
 import { startOfDay, addDays } from "date-fns";
 import { logoutPlanning } from "./login/actions";
 
@@ -27,13 +28,17 @@ export default async function PlanningPage() {
   return (
     <main className="min-h-screen max-w-[1800px] mx-auto px-8 py-12 text-left bg-slate-50/30">
       <header className="mb-12 flex items-center justify-between gap-4">
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
-        >
-          <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-          <span className="text-xs font-bold uppercase tracking-widest">Wróć do monitora</span>
-        </Link>
+        <div className="flex items-center gap-6">
+          <Logo className="h-6" />
+          <span className="h-5 w-px bg-slate-200" aria-hidden="true" />
+          <Link
+            href="/"
+            className="flex items-center gap-2 text-slate-400 hover:text-slate-900 transition-colors group"
+          >
+            <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
+            <span className="text-xs font-bold uppercase tracking-widest">Wróć do monitora</span>
+          </Link>
+        </div>
         <form action={logoutPlanning}>
           <button
             type="submit"

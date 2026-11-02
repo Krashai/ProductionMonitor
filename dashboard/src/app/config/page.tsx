@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ArrowLeft, SlidersHorizontal } from 'lucide-react';
 import { getAppMode } from '@/lib/settings';
 import { ConfigForm } from '@/components/ConfigForm';
+import { Logo } from '@/components/brand/Logo';
 
 // Ustawienia zależą od stanu bazy — render per żądanie, bez prerenderu.
 export const dynamic = 'force-dynamic';
@@ -12,6 +13,8 @@ export default async function ConfigPage() {
   return (
     <main className="min-h-screen bg-slate-50/30 px-6 py-12">
       <div className="w-full max-w-3xl mx-auto">
+        <Logo className="h-6 mb-8" />
+
         {/* Nagłówek */}
         <div className="flex items-start justify-between gap-6 mb-10">
           <div className="flex items-center gap-4">
