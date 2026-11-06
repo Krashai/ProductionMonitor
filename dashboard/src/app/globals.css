@@ -46,9 +46,8 @@ body {
   --lens: var(--brand-lamp);
 }
 .ln-logo[data-product="lineon"] {
-  --brand-lamp: #e5322d; /* `--lamp-lineon` z §4 — czerwień marki */
-  /* Soczewka LineON jest już czerwona, więc czerwone mrugnięcie byłoby
-     niewidoczne — lampka „gaśnie” do szarości (`--state-idle` z §4). */
+  --brand-lamp: #18b2a3; /* `--lamp-lineon` z §4 — zieleń marki (jak w ProductionDashboard) */
+  /* Lampka „gaśnie” do szarości (`--state-idle` z §4) — decyzja projektowa. */
   --wink: #c4c8ce;
 }
 .ln-logo .ln-glyphs {

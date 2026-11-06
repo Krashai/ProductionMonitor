@@ -20,10 +20,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const FONT_PATH = resolve(ROOT, 'brand/fonts/Barlow-SemiBold.ttf');
 
 // Dodanie produktu = jeden wpis. Ta aplikacja to LineON (MES, ProductionMonitor).
-// `brandLamp` to `--lamp-lineon` z sekcji 4 specyfikacji (czerwień marki —
-// hasło „Walk to the red”). `favicon` wskazuje produkt, którego lampka trafia
+// `brandLamp` to `--lamp-lineon` z sekcji 4 specyfikacji (zieleń/turkus marki,
+// ten sam kolor co lampka w ProductionDashboard). `favicon` wskazuje produkt, którego lampka trafia
 // do src/app/icon.svg.
-const PRODUCTS = [{ id: 'lineon', suffix: 'ON', brandLamp: '#E5322D', favicon: true }];
+const PRODUCTS = [{ id: 'lineon', suffix: 'ON', brandLamp: '#18B2A3', favicon: true }];
 // Kolor marki trafia tylko do plików SVG (działają też jako `<img>`). Komponent
 // Logo.tsx bierze kolory z CSS (`.ln-logo` w globals.css) — przy zmianie
 // koloru produktu popraw oba miejsca.

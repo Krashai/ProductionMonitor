@@ -6,10 +6,10 @@
 > **Zakres wdrożenia w tej aplikacji (ProductionMonitor):**
 > tylko LineON — wordmark (`public/brand/logo/lineon.svg`), favicon
 > (`src/app/icon.svg`) i komponent `src/components/brand/Logo.tsx` w nagłówkach
-> ekranów. Lampka NIE pokazuje stanu systemu: świeci czerwienią marki
+> ekranów. Lampka NIE pokazuje stanu systemu: świeci zielenią marki (jak w ProductionDashboard)
 > (`--lamp-lineon`), a co 1–3 min na widokach kiosku mruga dwa razy (easter egg).
-> Ponieważ soczewka LineON jest już czerwona, mrugnięcie to chwilowe zgaśnięcie
-> do szarości (`--state-idle`), a nie czerwień jak w LineFLOW. Bez sloganu,
+> Mrugnięcie to chwilowe zgaśnięcie do szarości (`--state-idle`), a nie
+> czerwień jak w LineFLOW. Bez sloganu,
 > wariantów inverse/mono, PNG i reguł ciemnego motywu (aplikacja ma zawsze białe
 > tło). Siostrzana aplikacja LineFLOW ma własną kopię tej specyfikacji.
 > Generowanie: `npm run build:logo` (`scripts/build-logo.mjs`).
@@ -73,7 +73,7 @@ Odstępy poziome mierz po bounding boxach ścieżek glifów (`path.getBoundingBo
 |---|---|---|---|
 | `--logo-ink` | `#14171C` | `#F2F4F7` | tekst wordmarku |
 | `--logo-bezel` | `#8A9099` | `#6B7280` | obudowa lampki |
-| `--lamp-lineon` | `#E5322D` | `#E5322D` | soczewka LineON (stan „brand”) |
+| `--lamp-lineon` | `#18B2A3` | `#18B2A3` | soczewka LineON (stan „brand”) |
 | `--lamp-lineflow` | `#18B2A3` | `#18B2A3` | soczewka LineFLOW (stan „brand”) |
 | `--state-ok` | `#22B35E` | `#22B35E` | wszystko pracuje |
 | `--state-warning` | `#F2A516` | `#F2A516` | uwaga |
@@ -97,7 +97,7 @@ Atrybut `data-state` na elemencie logo: `brand` (domyślny) | `ok` | `warning` |
 
 ```css
 .ln-logo { --ink: #14171C; --bezel: #8A9099; --lens: var(--brand-lamp); }
-.ln-logo[data-product="lineon"]   { --brand-lamp: #E5322D; }
+.ln-logo[data-product="lineon"]   { --brand-lamp: #18B2A3; }
 .ln-logo[data-product="lineflow"] { --brand-lamp: #18B2A3; }
 .ln-logo[data-state="ok"]      { --lens: #22B35E; }
 .ln-logo[data-state="warning"] { --lens: #F2A516; }
